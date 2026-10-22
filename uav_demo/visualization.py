@@ -14,6 +14,19 @@ if TYPE_CHECKING:
     from .config import EnvConfig
 
 
+def policy_label(policy: str | None) -> str:
+    """按保存的策略来源标注，避免将脚本或规划器回放误当成训练效果。"""
+    if policy == "dqn":
+        return "DQN (learned policy)"
+    if policy == "predictive":
+        return "Learned motion model + intercept planner (not DQN)"
+    if policy in ("oracle", "oracle_heuristic"):
+        return "Oracle heuristic (not learned)"
+    if isinstance(policy, str) and policy.startswith("diagnostic"):
+        return "DIAGNOSTIC (scripted, not learned)"
+    return "Unknown policy"
+
+
 def render_episode(
     config: EnvConfig,
     car_trajectory: np.ndarray,
@@ -23,11 +36,13 @@ def render_episode(
     *,
     save_gif: bool = True,
     show: bool = False,
+    policy: str | None = None,
 ) -> dict[str, str]:
     """输出 ``trajectory.png`` 和可选 ``episode.gif``，返回文件绝对路径。
 
-    records 应包含 t=0 和每个 step 后的状态。浅橙色虚线展示车辆
-    整条已知轨迹，实线只展示当前时刻已经执行的部分。
+    records 应包含 t=0 和每个 step 后的状态。只有 Oracle 显示浅橙色
+    完整真实路线；DQN 只显示已走过的路线，以及 car_prediction 中保存的
+    学习预测（紫色虚线）。policy 标注 DQN、Oracle 或诊断脚本，缺失为 Unknown。
     """
     if not records:
         raise ValueError("records must include at least the initial state")
@@ -50,12 +65,24 @@ def render_episode(
     completed = [i for i, record in enumerate(records) if record["sensing_complete"]]
     completion_index = completed[0] if completed else None
     trajectory = np.asarray(car_trajectory, dtype=float)
+    show_full_route = policy in ("oracle", "oracle_heuristic")
+    predictions = []
+    for record in records:
+        points = record.get("car_prediction")
+        points = np.asarray([] if points is None else points, dtype=float)
+        if points.size == 0:
+            points = np.empty((0, 2))
+        elif points.ndim != 2 or points.shape[1] != 2 or not np.isfinite(points).all():
+            raise ValueError("car_prediction must contain finite (x, y) points")
+        predictions.append(points)
+    has_predictions = any(len(points) for points in predictions)
 
     blue, orange, green = "#2463CC", "#D98216", "#1C9469"
+    purple = "#8753B7"
     fig = plt.figure(figsize=(10.4, 7.7), facecolor="#FAFBFD")
     layout = fig.add_gridspec(
         1, 2, width_ratios=(4.8, 1.65), left=0.07, right=0.98,
-        bottom=0.09, top=0.88, wspace=0.11,
+        bottom=0.09, top=0.85, wspace=0.11,
     )
     ax = fig.add_subplot(layout[0])
     panel = fig.add_subplot(layout[1])
@@ -64,9 +91,21 @@ def render_episode(
         f"{config.grid_size} x {config.grid_size} GridWorld | UAV sensing mission",
         x=0.07, y=0.96, ha="left", fontsize=16, fontweight="bold", color="#192D45",
     )
+    if show_full_route:
+        information_label = "Full vehicle route known  /  No obstacles  /  Eight-direction UAV"
+    elif policy in ("dqn", "predictive"):
+        information_label = "Current vehicle state  /  No future route"
+        if has_predictions:
+            information_label = "Current vehicle state  /  Learned motion forecast  /  No future route"
+    else:
+        information_label = "Recorded vehicle history  /  No obstacles  /  Eight-direction UAV"
     fig.text(
-        0.07, 0.915, "Full vehicle route known  /  No obstacles  /  Eight-direction UAV",
+        0.07, 0.915, information_label,
         fontsize=10, color="#657386",
+    )
+    fig.text(
+        0.07, 0.883, f"Policy: {policy_label(policy)}",
+        fontsize=10, fontweight="bold", color="#AC4260" if policy_label(policy).startswith("DIAGNOSTIC") else "#34465C",
     )
 
     ax.set_facecolor("#F4F7FB")
@@ -87,10 +126,11 @@ def render_episode(
     for spine in ax.spines.values():
         spine.set_color("#CFD8E5")
 
-    ax.plot(
-        trajectory[:, 0], trajectory[:, 1], "--", color=orange,
-        alpha=0.28, linewidth=2.2, zorder=2,
-    )
+    if show_full_route:
+        ax.plot(
+            trajectory[:, 0], trajectory[:, 1], "--", color=orange,
+            alpha=0.28, linewidth=2.2, zorder=2,
+        )
     ax.scatter(*config.uav_start, s=120, color=green, edgecolors="white", zorder=7)
     ax.scatter(
         *config.uav_goal, s=175, color="#AC4260", marker="*",
@@ -111,6 +151,7 @@ def render_episode(
     )
 
     car_line, = ax.plot([], [], color=orange, linewidth=1.8, alpha=0.9, zorder=3)
+    forecast_line, = ax.plot([], [], "--", color=purple, linewidth=2.0, alpha=0.9, zorder=4)
     uav_line, = ax.plot([], [], color=blue, linewidth=2.0, zorder=4)
     contacts = ax.scatter([], [], s=22, color=green, alpha=0.9, zorder=5)
     sensing_finished = ax.scatter(
@@ -139,11 +180,14 @@ def render_episode(
     legend_handles = [
         Line2D([], [], color=blue, linewidth=2, label="UAV path"),
         Line2D([], [], color=orange, linewidth=2, label="Car path so far"),
-        Line2D([], [], color=orange, alpha=0.35, linestyle="--", label="Full car route"),
         Line2D([], [], color=green, marker="o", markersize=5, linestyle="none", label="Sensing contact"),
         Line2D([], [], color=green, marker="o", fillstyle="none", markersize=8, linestyle="none", label="Sensing finished"),
         Line2D([], [], color="#995D18", marker="D", fillstyle="none", linestyle="none", label="Car destination"),
     ]
+    if show_full_route:
+        legend_handles.insert(2, Line2D([], [], color=orange, alpha=0.35, linestyle="--", label="Full car route"))
+    if has_predictions:
+        legend_handles.insert(2, Line2D([], [], color=purple, linewidth=2, linestyle="--", label="Learned forecast"))
     panel.legend(
         handles=legend_handles, loc="lower left", bbox_to_anchor=(-0.05, 0.13),
         frameon=False, fontsize=9, handlelength=2.4, labelspacing=1.1,
@@ -159,6 +203,11 @@ def render_episode(
         record = records[index]
         uav_line.set_data(uav[: index + 1, 0], uav[: index + 1, 1])
         car_line.set_data(car[: index + 1, 0], car[: index + 1, 1])
+        if len(predictions[index]):
+            forecast = np.vstack((car[index], predictions[index]))
+            forecast_line.set_data(forecast[:, 0], forecast[:, 1])
+        else:
+            forecast_line.set_data([], [])
         uav_marker.set_data([uav[index, 0]], [uav[index, 1]])
         car_marker.set_data([car[index, 0]], [car[index, 1]])
         contacts.set_offsets(uav[: index + 1][contact[: index + 1]])
@@ -171,8 +220,14 @@ def render_episode(
 
         if record["success"]:
             phase, color = "SUCCESS", green
+        elif record.get("sensing_failed") and (
+            record.get("uav_reached_goal") or record.get("phase") == "failed"
+        ):
+            phase, color = "SENSING FAILED", "#AC4260"
         elif index == len(records) - 1 and record["time"] >= config.max_steps:
             phase, color = "TIME LIMIT", "#AC4260"
+        elif record.get("sensing_failed"):
+            phase, color = "Failed: to goal", "#AC4260"
         elif record["sensing_complete"]:
             phase, color = "To destination", blue
         elif record["sensing_progress"]:
@@ -184,6 +239,7 @@ def render_episode(
         ux, uy = (int(value) for value in record["uav_pos"])
         cx, cy = (int(value) for value in record["car_pos"])
         mode = "Consecutive" if config.sensing_mode == "consecutive" else "Cumulative"
+        sensing_status = "FAILED (car arrived)" if record.get("sensing_failed") else f"{mode} sensing"
         status_text.set_text(
             f"Step       {record['time']} / {config.max_steps}\n"
             f"UAV       ({ux}, {uy})\n"
@@ -192,9 +248,9 @@ def render_episode(
             f"Distance  {record['travel_distance']:.1f} cells\n\n"
             f"Sensing   {record['sensing_progress']} / {config.sensing_steps}\n"
             f"Radius     {config.sensing_radius:g} cells\n"
-            f"{mode} sensing"
+            f"{sensing_status}"
         )
-        return uav_line, car_line, contacts, sensing_finished, uav_marker, car_marker, sensing_circle, phase_text, status_text
+        return uav_line, car_line, forecast_line, contacts, sensing_finished, uav_marker, car_marker, sensing_circle, phase_text, status_text
 
     paths: dict[str, str] = {}
     try:
@@ -232,14 +288,17 @@ def main() -> None:
     args = parser.parse_args()
     episode_path = args.episode.resolve()
     episode = json.loads(episode_path.read_text(encoding="utf-8"))
+    env_values = dict(episode["config"])
+    env_values.setdefault("car_spawn_region", "mixed")  # 兼容旧版回放的配置
     paths = render_episode(
-        EnvConfig(**episode["config"]),
+        EnvConfig(**env_values),
         np.asarray(episode["car_trajectory"]),
         tuple(episode["car_goal"]),
         episode["records"],
         episode_path.parent,
         save_gif=not args.no_gif,
         show=args.show,
+        policy=episode.get("summary", {}).get("policy"),
     )
     for kind, path in paths.items():
         print(f"{kind}: {path}")

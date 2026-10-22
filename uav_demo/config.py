@@ -28,12 +28,13 @@ def validate_network_settings(hidden_sizes, activation, leaky_relu_slope) -> tup
 @dataclass
 class EnvConfig:
     grid_size: int = 50
-    max_steps: int = 200
+    max_steps: int = 300
     uav_start: tuple[int, int] = (0, 0)
     uav_goal: tuple[int, int] = (49, 49)
     initial_speed: int = 1
 
-    car_move_every: int = 2
+    car_move_every: int = 1  # 每隔多少个环境步移动 1 格；1 为每步一格，2 为两步一格
+    car_spawn_region: str = "bottom_right"  # 右下区域；mixed 为旧版中部/上方/右方混合
     car_straight_prob: float = 0.65
     car_turn_prob: float = 0.15  # 左、右转各自的基础概率
     car_reverse_prob: float = 0.05
@@ -44,9 +45,13 @@ class EnvConfig:
     sensing_mode: str = "consecutive"  # 或 cumulative
 
     step_penalty: float = -0.1
-    progress_reward: float = 1.0
-    contact_reward: float = 0.5
-    sensing_complete_reward: float = 20.0
+    progress_reward: float = 0.2
+    progress_to_contact_boundary: bool = True  # 到感知范围即可，范围内不奖励继续贴近车中心
+    movement_penalty: float = -0.1  # 每格实际飞行距离的小代价，允许悬停等车节省路程
+    contact_reward: float = 2.0
+    sensing_complete_reward: float = 50.0
+    sensing_failure_penalty: float = -100.0  # 车辆到终点时仍未完成采集，仅扣一次
+    failed_return_progress_scale: float = 0.1  # 失败后的导航塑形弱化，不让返航抵消失败代价
     success_reward: float = 100.0
     invalid_move_penalty: float = -1.0
     timeout_penalty: float = -10.0
@@ -58,6 +63,8 @@ class EnvConfig:
             raise ValueError("max_steps 必须是正整数")
         if not isinstance(self.car_move_every, int) or self.car_move_every < 1:
             raise ValueError("car_move_every 必须是正整数")
+        if self.car_spawn_region not in ("bottom_right", "mixed"):
+            raise ValueError("car_spawn_region 只能取 bottom_right 或 mixed")
         if self.max_steps // self.car_move_every < 2 * (self.grid_size - 1):
             raise ValueError("时间上限太短：需保证车辆可从任意起点到达终点")
         for name in ("uav_start", "uav_goal"):
@@ -82,13 +89,21 @@ class EnvConfig:
             raise ValueError("sensing_steps 必须为 1 到 max_steps 之间的整数")
         if self.sensing_mode not in ("consecutive", "cumulative"):
             raise ValueError("sensing_mode 只能取 consecutive 或 cumulative")
+        if not math.isfinite(self.sensing_failure_penalty) or self.sensing_failure_penalty >= 0:
+            raise ValueError("sensing_failure_penalty 必须是有限负数")
+        if not 0 <= self.failed_return_progress_scale <= 1:
+            raise ValueError("failed_return_progress_scale 必须在 [0, 1] 内")
+        if not isinstance(self.progress_to_contact_boundary, bool):
+            raise ValueError("progress_to_contact_boundary 必须为布尔值")
+        if not math.isfinite(self.movement_penalty) or self.movement_penalty > 0:
+            raise ValueError("movement_penalty 必须是有限非正数")
 
 
 @dataclass
 class TrainConfig:
     episodes: int = 1500
     batch_size: int = 64
-    learning_rate: float = 0.001
+    learning_rate: float = 0.0005
     gamma: float = 0.99
     replay_capacity: int = 50_000
     learning_starts: int = 1000
@@ -107,11 +122,15 @@ class TrainConfig:
     eval_episodes: int = 10
     eval_seed: int = 1_000_000
     log_every: int = 25
+    use_motion_prediction: bool = True
+    prediction_routes: int = 300
+    prediction_epochs: int = 20
 
     def __post_init__(self) -> None:
         positive_fields = (
             "episodes", "batch_size", "replay_capacity", "train_every", "target_update_every",
             "epsilon_decay_steps", "torch_threads", "eval_every", "eval_episodes", "log_every",
+            "prediction_routes", "prediction_epochs",
         )
         for name in positive_fields:
             value = getattr(self, name)

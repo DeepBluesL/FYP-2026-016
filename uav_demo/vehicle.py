@@ -24,22 +24,24 @@ def generate_vehicle_trajectory(
     if budget < 2 * (size - 1):
         raise ValueError("车辆移动预算必须至少覆盖地图的最大曼哈顿距离。")
 
-    # 各一半概率出生在地图中间，或在上方 / 右方区域。
-    if rng.random() < 0.5:
+    # x 向右、y 向上：固定在右下三分之一区域内随机出生。
+    # 50x50 时为 x=33..49、y=0..16；按地图尺寸缩放。
+    if config.car_spawn_region == "bottom_right":
+        position = np.asarray((
+            rng.integers(2 * size // 3, size),
+            rng.integers(0, (size + 2) // 3),
+        ), dtype=np.int64)
+    # mixed 保留旧版出生点的取样规则；终点仍遵循当前左上角设置。
+    elif rng.random() < 0.5:
         low, high = size // 3, min(size, 2 * size // 3 + 1)
         position = rng.integers(low, high, size=2, dtype=np.int64)
     else:
         position = rng.integers(0, size, size=2, dtype=np.int64)
         position[int(rng.integers(0, 2))] = rng.integers(2 * size // 3, size)
 
-    # 有限候选集合取样，不使用可能无限重试的 while 随机取点。
-    candidates = np.indices((size, size)).reshape(2, -1).T
-    distances = np.abs(candidates - position).sum(axis=1)
-
-    # 默认车辆起点和终点之间的曼哈顿距离至少为 25 格
-    candidates = candidates[(distances >= max(1, size // 2)) & (distances <= budget)]
-    goal_array = candidates[int(rng.integers(len(candidates)))].copy()
-    goal = (int(goal_array[0]), int(goal_array[1]))
+    # 车辆终点固定在左上角；坐标随地图尺寸变化。
+    goal = (0, size - 1)
+    goal_array = np.asarray(goal, dtype=np.int64)
     heading = int(rng.integers(0, 4))
     trajectory = np.empty((config.max_steps + 1, 2), dtype=np.int64)
     trajectory[0] = position
@@ -49,7 +51,7 @@ def generate_vehicle_trajectory(
     )
 
     for time in range(1, config.max_steps + 1):
-        # 两步一格，生成轨迹
+        # 每 car_move_every 个环境步移动一格，到达终点后停留。
         if time % config.car_move_every == 0 and not np.array_equal(position, goal_array):
             options = position + DIRECTIONS
             # 检查地图边界
