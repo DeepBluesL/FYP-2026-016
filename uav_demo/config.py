@@ -34,7 +34,7 @@ class EnvConfig:
     initial_speed: int = 1
 
     car_move_every: int = 1  # 每隔多少个环境步移动 1 格；1 为每步一格，2 为两步一格
-    car_spawn_region: str = "bottom_right"  # 右下区域；mixed 为旧版中部/上方/右方混合
+    car_spawn_region: str = "bottom_right"  # 兼容旧 checkpoint 的字段；当前统一固定右下角，随机起点逻辑已注释
     car_straight_prob: float = 0.65
     car_turn_prob: float = 0.15  # 左、右转各自的基础概率
     car_reverse_prob: float = 0.05

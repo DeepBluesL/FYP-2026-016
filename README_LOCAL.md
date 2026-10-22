@@ -1,5 +1,28 @@
 UAV Path Planning for Dynamic Target Tracking and Sensing under Different Observability Conditions
 
+## 固定右下角起点：DQN 与贪心对比
+
+车辆当前从 `(grid_size - 1, 0)` 出发，50×50 时为 `(49, 0)`。`uav_demo/vehicle.py` 中原随机起点代码已注释保留；车辆后续路线仍随机。旧 checkpoint 的 `car_spawn_region` 字段仅用于兼容，不再决定当前起点。由于起点抽样不再消耗随机数，相同种子生成的路线也会与旧版本不同。
+
+在仓库根目录、包含 PyTorch 的 `uav` 环境中运行：
+
+```powershell
+python compare_pursuit.py --training-context random_start --episodes 100 --seed 4000000 --output-dir outputs/fixed_corner_comparison
+```
+
+脚本复用现有 `wait_train/best_model.pt`，不重新训练。两种策略采用 checkpoint 中相同的环境参数和逐条相同的车辆路线；DQN 保留学得的运动预测特征，贪心只追当前车位。输出逐回合 `episodes.csv`、`summary.json`，以及第一条测试路线两种策略的 JSON、PNG 和 GIF。
+
+本次种子 4000000–4000099、连续感知 5 步、半径 2 的测试：两者成功率均为 100%；DQN 平均完成时间 46.95 步、平均路程 94.42 格，贪心分别为 43.56 步、89.89 格。上述均值取成功回合，本次 100 条路线均为双方成功。这是旧随机起点模型迁移到固定起点的测试，不代表在固定起点重新训练后的 RL 性能。
+
+固定起点重新训练与配对测试：
+
+```powershell
+python train.py --episodes 1500 --eval-episodes 20 --log-every 100 --output-dir outputs/fixed_corner_train
+python compare_pursuit.py --checkpoint outputs/fixed_corner_train/best_model.pt --training-context fixed_corner --episodes 100 --seed 4000000 --output-dir outputs/fixed_corner_retrained_comparison
+```
+
+本次从零重新拟合车辆预测器并训练 DQN，训练种子 42–1541、验证种子 1000000–1000019；根据验证集选择第 900 回合 checkpoint。测试仍使用 4000000–4000099，不用于模型选择。重训 DQN 与贪心成功率均为 100%；平均完成时间分别为 43.78 / 43.56 步，平均路程为 92.31 / 89.89 格。DQN 比旧模型更快，但在本次 100 条路线中仍未超过贪心的时间与路程表现。这是一次训练种子的结果，不代表多次训练的统计结论。实验起点与种子说明保存在 `outputs/fixed_corner_train/experiment.json`。
+
 ## 最小 Demo：50 × 50，1 UAV，1 Car，当前状态与学习预测
 
 当前学习任务是：**UAV 从左下角出发，利用车辆当前状态和学习得到的运动预测，先尝试拦截并完成感知，再飞往右上角终点**。DQN 不知道本回合车辆的真实未来路线。场景暂不包含障碍物或视野限制；Oracle 作为单独的、拥有完整未来信息的启发式参照保留。
@@ -54,7 +77,7 @@ outputs/               # 模型、日志与图像，已被 Git 忽略
 | 地图 | 50 × 50，无障碍；坐标 0–49，x 向右、y 向上 |
 | UAV 起点 / 终点 | `(0, 0)` / `(49, 49)` |
 | UAV 移动 | 八方向，每步选择网格步长 1 或 2；另有悬停 |
-| Car 起点 | `car_spawn_region="bottom_right"`，在 x=33–49、y=0–16 内随机出生 |
+| Car 起点 | 固定右下角 `(49, 0)`（一般为 `(grid_size - 1, 0)`）；原随机起点代码已注释，`car_spawn_region` 仅保留兼容旧模型 |
 | Car 终点 | 左上角 `(0, 49)`；按地图尺寸取 `(0, grid_size - 1)` |
 | Car 速度 | `car_move_every=1`，每个环境步移动 1 格；到站后停留 |
 | Car 方向惯性 | 基础权重：直行 0.65、左/右转各 0.15、掉头 0.05 |

@@ -20,6 +20,8 @@ def policy_label(policy: str | None) -> str:
         return "DQN (learned policy)"
     if policy == "predictive":
         return "Learned motion model + intercept planner (not DQN)"
+    if policy == "greedy_pursuit":
+        return "Greedy pursuit (current position, no learning)"
     if policy in ("oracle", "oracle_heuristic"):
         return "Oracle heuristic (not learned)"
     if isinstance(policy, str) and policy.startswith("diagnostic"):
@@ -93,7 +95,7 @@ def render_episode(
     )
     if show_full_route:
         information_label = "Full vehicle route known  /  No obstacles  /  Eight-direction UAV"
-    elif policy in ("dqn", "predictive"):
+    elif policy in ("dqn", "predictive", "greedy_pursuit"):
         information_label = "Current vehicle state  /  No future route"
         if has_predictions:
             information_label = "Current vehicle state  /  Learned motion forecast  /  No future route"
