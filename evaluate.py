@@ -30,7 +30,8 @@ def evaluate_episode(agent, env, seed: int, controller=None) -> dict:
         controller.reset()
     first_contact = 0 if info["contact"] else None
     sensing_complete_step, pre_contact_hover_steps, hover_streak = None, 0, 0
-    waiting_contact, early_goal, total_reward = False, False, 0.0
+    early_goal = info["uav_reached_goal"] and not info["sensing_finished"]
+    waiting_contact, total_reward = False, 0.0
     while True:
         old_position = tuple(info["uav_pos"])
         action = (agent.choose_action(observation, epsilon=0.0, mask=env.valid_action_mask())

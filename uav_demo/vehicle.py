@@ -20,9 +20,6 @@ def generate_vehicle_trajectory(
     这样每次 reset 都能得到一条完整、可复现且确实到终点的路线。
     """
     size = config.grid_size
-    budget = config.max_steps // config.car_move_every
-    if budget < 2 * (size - 1):
-        raise ValueError("车辆移动预算必须至少覆盖地图的最大曼哈顿距离。")
 
     # x 向右、y 向上：起点固定右下角，50x50 时为 (49, 0)。
     position = np.asarray((size - 1, 0), dtype=np.int64)
@@ -46,10 +43,11 @@ def generate_vehicle_trajectory(
     heading = int(rng.integers(0, 4))
     trajectory = np.empty((config.max_steps + 1, 2), dtype=np.int64)
     trajectory[0] = position
-    turn_probabilities = np.asarray(
+    # EnvConfig 已保证各方向权重为正；固定的 log 权重只计算一次。
+    log_turn_weights = np.log(np.asarray(
         (config.car_straight_prob, config.car_turn_prob,
          config.car_reverse_prob, config.car_turn_prob), dtype=np.float64
-    )
+    ))
 
     for time in range(1, config.max_steps + 1):
         # 每 car_move_every 个环境步移动一格，到达终点后停留。
@@ -62,25 +60,14 @@ def generate_vehicle_trajectory(
             # 检查剩余移动机会是否满足要求
             feasible = in_bounds & (next_distances <= remaining_moves - 1)
             direction_indices = np.flatnonzero(feasible)
-            if not len(direction_indices):
-                raise RuntimeError("车辆无法在给定时间内抵达终点，请检查移动预算。")
 
             # 根据方向惯性和终点偏置计算概率
             relative_turns = (direction_indices - heading) % 4
-            base_weights = turn_probabilities[relative_turns]
             current_distance = int(np.abs(position - goal_array).sum())
             progress = current_distance - next_distances[direction_indices]
             # 用 log 权重归一化，避免较大 goal_bias 造成 exp 溢出。
-            positive = base_weights > 0
-            if positive.any():
-                logits = np.full(len(base_weights), -np.inf)
-                logits[positive] = (
-                        np.log(base_weights[positive]) + config.car_goal_bias * progress[positive]
-                )
-                weights = np.exp(logits - np.max(logits))
-            else:
-                # 例如配置为始终直行，却正好朝向边界：选择合法方向。
-                weights = np.ones(len(direction_indices), dtype=np.float64)
+            logits = log_turn_weights[relative_turns] + config.car_goal_bias * progress
+            weights = np.exp(logits - np.max(logits))
             weights /= weights.sum()
             heading = int(rng.choice(direction_indices, p=weights))
             position = options[heading].copy()
