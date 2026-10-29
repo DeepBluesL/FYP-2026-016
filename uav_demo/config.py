@@ -126,6 +126,11 @@ class TrainConfig:
     prediction_routes: int = 300
     prediction_epochs: int = 20
 
+    @property
+    def prediction_route_count(self) -> int:
+        """启用预测器时使用的路线数，至少两条以划分拟合与内部验证集。"""
+        return max(2, min(self.prediction_routes, self.episodes))
+
     def __post_init__(self) -> None:
         positive_fields = (
             "episodes", "batch_size", "replay_capacity", "train_every", "target_update_every",
@@ -141,15 +146,16 @@ class TrainConfig:
         )
         if not isinstance(self.learning_starts, int) or self.learning_starts < 0:
             raise ValueError("learning_starts 必须为非负整数")
-        if self.replay_capacity < max(self.batch_size, self.learning_starts):
-            raise ValueError("replay_capacity 不能小于 batch_size 或 learning_starts")
+        if self.replay_capacity < self.batch_size:
+            raise ValueError("replay_capacity 不能小于 batch_size")
         if not math.isfinite(self.learning_rate) or self.learning_rate <= 0:
             raise ValueError("learning_rate 必须为有限正数")
         if not 0 <= self.gamma <= 1:
             raise ValueError("gamma 必须在 [0, 1] 范围内")
         if not 0 <= self.epsilon_end <= self.epsilon_start <= 1:
             raise ValueError("epsilon 必须满足 0 <= end <= start <= 1")
-        if self.seed < 0 or self.eval_seed < self.seed + self.episodes:
+        training_routes = max(self.episodes, self.prediction_route_count) if self.use_motion_prediction else self.episodes
+        if self.seed < 0 or self.eval_seed < self.seed + training_routes:
             raise ValueError("训练种子必须非负，且训练/验证种子区间不能重叠")
         if self.device not in ("cpu", "cuda", "auto"):
             raise ValueError("device 只能取 cpu、cuda 或 auto")

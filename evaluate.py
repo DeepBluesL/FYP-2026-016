@@ -17,7 +17,7 @@ def check_test_seeds(agent, seed: int, episodes: int) -> None:
     ranges = [("DQN 训练", cfg.seed, cfg.seed + cfg.episodes),
               ("验证", cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)]
     if agent.motion_predictor is not None:
-        count = max(2, min(cfg.prediction_routes, cfg.episodes))
+        count = cfg.prediction_route_count
         ranges.append(("车辆预测器训练/内部验证", cfg.seed, cfg.seed + count))
     for name, start, end in ranges:
         if seed < end and seed + episodes > start:

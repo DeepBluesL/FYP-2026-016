@@ -54,9 +54,6 @@ def evaluate(agent: DQNAgent, env_config: EnvConfig, config: TrainConfig) -> dic
 
 def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) -> DQNAgent:
     # 验证集合固定复用；另留 2,000,000+ 作为最终测试种子。
-    prediction_count = max(2, min(config.prediction_routes, config.episodes)) if config.use_motion_prediction else 0
-    if config.seed < 0 or config.seed + max(config.episodes, prediction_count) > config.eval_seed:
-        raise ValueError("训练种子范围必须非负且小于 eval_seed，以免与验证轨迹重叠。")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "config.json").write_text(
@@ -67,6 +64,7 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
     predictor = None
     if config.use_motion_prediction:
         # 只使用训练种子生成监督样本；验证和最终测试路线都不能进入预测器拟合。
+        prediction_count = config.prediction_route_count
         print(f"Fitting vehicle motion model on {prediction_count} training routes...", flush=True)
         predictor, prediction_metrics = MotionPredictor.fit(
             env_config, range(config.seed, config.seed + prediction_count),
@@ -101,15 +99,17 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
         for episode in range(1, config.episodes + 1):
             seed = config.seed + episode - 1
             observation, info = env.reset(seed=seed)
+            mask = env.valid_action_mask()
             episode_reward, losses = 0.0, []
             done = False
             while not done:
                 epsilon = epsilon_at(agent.environment_steps, config)
-                action = agent.choose_action(observation, epsilon, env.valid_action_mask())
+                action = agent.choose_action(observation, epsilon, mask)
                 next_observation, reward, terminated, truncated, info = env.step(action)
+                next_mask = env.valid_action_mask()
                 done = terminated or truncated
                 agent.remember(
-                    observation, action, reward, next_observation, done, env.valid_action_mask()
+                    observation, action, reward, next_observation, done, next_mask
                 )
                 if (
                     agent.environment_steps >= config.learning_starts
@@ -118,7 +118,7 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
                     loss = agent.update()
                     if loss is not None:
                         losses.append(loss)
-                observation = next_observation
+                observation, mask = next_observation, next_mask
                 episode_reward += reward
             writer.writerow(
                 {

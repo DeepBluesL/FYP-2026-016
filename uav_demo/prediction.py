@@ -33,9 +33,13 @@ velocity 使用 (0, 0)；停顿帧沿用上次观察到的非零位移，不访�
         raise ValueError("位置、位移和终点最后一维必须是 2")
     if not all(np.isfinite(value).all() for value in (position, velocity, goal)):
         raise ValueError("预测输入必须是有限数")
-    scale = grid_size - 1
+    return _feature_values(position, velocity, goal, grid_size - 1)
+
+
+def _feature_values(position, velocity, goal, scale) -> np.ndarray:
+    """拼接已校验的 float32 状态，供批量样本和递归预测共用。"""
     return np.concatenate((position / scale, velocity, goal / scale,
-                           (goal - position) / scale), axis=-1).astype(np.float32)
+                           (goal - position) / scale), axis=-1).astype(np.float32, copy=False)
 
 
 def _legal_directions(positions: np.ndarray, grid_size: int) -> np.ndarray:
@@ -47,19 +51,15 @@ def _examples(config: EnvConfig, seeds: list[int]) -> tuple[np.ndarray, np.ndarr
     features, labels, masks = [], [], []
     for seed in seeds:
         route, goal = generate_vehicle_trajectory(config, np.random.default_rng(seed))
-        observed_velocity = np.zeros(2, dtype=np.float32)
-        for time in range(1, len(route)):
-            displacement = route[time] - route[time - 1]
-            if not displacement.any():
-                continue
-            # route[t] 只用于训练标签；输入取发生该移动之前的可见状态。
-            features.append(make_features(route[time - 1], observed_velocity, goal, config.grid_size))
-            labels.append(int(np.flatnonzero((DIRECTIONS == displacement).all(axis=1))[0]))
-            masks.append(_legal_directions(route[time - 1], config.grid_size))
-            observed_velocity = displacement
-    if not labels:
-        raise ValueError("提供的种子没有产生可用于训练的车辆移动")
-    return np.asarray(features, dtype=np.float32), np.asarray(labels, dtype=np.int64), np.asarray(masks)
+        displacements = np.diff(route, axis=0)
+        moving = np.any(displacements, axis=1)
+        positions, moves = route[:-1][moving], displacements[moving]
+        # 当前移动只作标签；停顿帧沿用上次已观察到的移动，首次朝向未知。
+        velocities = np.vstack((np.zeros((1, 2), dtype=np.int64), moves[:-1]))
+        features.append(make_features(positions, velocities, goal, config.grid_size))
+        labels.append((moves[:, None, :] == DIRECTIONS).all(axis=2).argmax(axis=1))
+        masks.append(_legal_directions(positions, config.grid_size))
+    return np.concatenate(features), np.concatenate(labels), np.concatenate(masks)
 
 
 class MotionPredictor(nn.Module):
@@ -120,7 +120,7 @@ class MotionPredictor(nn.Module):
             raise ValueError("epochs 和 batch_size 必须为正整数")
         if not np.isfinite(learning_rate) or learning_rate <= 0:
             raise ValueError("learning_rate 必须为有限正数")
-        split = max(1, min(len(seeds) - 1, int(len(seeds) * 0.8)))
+        split = int(len(seeds) * 0.8)  # 至少两个不同种子，两侧自然非空。
         fit_seeds, holdout_seeds = seeds[:split], seeds[split:]
         train_arrays = _examples(config, fit_seeds)
         holdout_arrays = _examples(config, holdout_seeds)
@@ -196,10 +196,11 @@ class MotionPredictor(nn.Module):
         # 每次调用读取当前权重，load_state_dict 后不会遗留旧预测缓存。
         weights = [(layer.weight.detach().cpu().numpy(), layer.bias.detach().cpu().numpy())
                    for layer in self.layers if isinstance(layer, nn.Linear)]
+        scale = grid_size - 1
         forecast = [position.copy()]
         for offset in range(1, max(steps) + 1):
             if (time + offset) % move_every == 0 and not np.allclose(position, goal, atol=1e-6, rtol=0):
-                values = make_features(position, velocity, goal, grid_size)
+                values = _feature_values(position, velocity, goal, scale)
                 for index, (weight, bias) in enumerate(weights):
                     values = values @ weight.T + bias
                     if index < len(weights) - 1:

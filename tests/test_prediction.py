@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from uav_demo.config import EnvConfig
-from uav_demo.prediction import MotionPredictor, make_features
+from uav_demo.prediction import MotionPredictor, _examples, make_features
 
 
 class MotionPredictionTests(unittest.TestCase):
@@ -19,9 +19,31 @@ class MotionPredictionTests(unittest.TestCase):
         return model
 
     def test_feature_inputs_are_observed_state_only(self):
-        features = make_features((2, 3), (0, 1), (0, 4), 5)
-        np.testing.assert_allclose(features, [0.5, 0.75, 0, 1, 0, 1, -0.5, 0.25])
+        for scale in (4, 65536):
+            with self.subTest(scale=scale):
+                features = make_features((scale // 2, 3 * scale // 4), (0, 1), (0, scale), scale + 1)
+                np.testing.assert_allclose(features, [0.5, 0.75, 0, 1, 0, 1, -0.5, 0.25])
+                self.assertEqual(features.dtype, np.float32)
+
+    def test_training_examples_preserve_observed_velocity_across_idle_ticks(self):
+        config = EnvConfig(grid_size=5, max_steps=16, uav_goal=(4, 4), car_move_every=2)
+        route = np.repeat(np.asarray([
+            (4, 0), (4, 1), (3, 1), (3, 2), (2, 2),
+            (2, 3), (1, 3), (1, 4), (0, 4),
+        ]), 2, axis=0)[:-1]
+        with patch('uav_demo.prediction.generate_vehicle_trajectory', return_value=(route, (0, 4))):
+            features, labels, masks = _examples(config, [42])
+        self.assertEqual(features.shape, (8, 8))
         self.assertEqual(features.dtype, np.float32)
+        np.testing.assert_array_equal(features[:3], [
+            [1, 0, 0, 0, 0, 1, -1, 1],
+            [1, 0.25, 0, 1, 0, 1, -1, 0.75],
+            [0.75, 0.25, -1, 0, 0, 1, -0.75, 0.75],
+        ])
+        np.testing.assert_array_equal(labels, [0, 3] * 4)
+        np.testing.assert_array_equal(masks[:3], [
+            [True, False, False, True], [True, False, True, True], [True] * 4,
+        ])
 
     def test_probability_mean_does_not_choose_argmax_route(self):
         model = self.uniform_predictor()
