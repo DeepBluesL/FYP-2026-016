@@ -26,7 +26,7 @@ class OraclePlanner:
             if not invalid:
                 candidates.append((action, position, speed))
 
-        if env.sensing_complete:
+        if env.sensing_finished:
             target = env.config.uav_goal
         else:
             next_car = env.car_trajectory[min(env.time + 1, env.config.max_steps)]

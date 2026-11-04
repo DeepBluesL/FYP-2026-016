@@ -1,6 +1,6 @@
 UAV Path Planning for Dynamic Target Tracking and Sensing under Different Observability Conditions  
 
-位置延迟实验：[uav_delay/README.md](uav_delay/README.md)。第 t 步只收到第 max(0,t-d) 步的车辆位置；
+位置延迟实验：[uav_delay/README.md](uav_delay/README.md)。第 t 步只收到第 t−d 步的车辆位置（首次报告在第 d 步到达）；
 比较线性外推规则与“规则 + PPO 修正”（PyTorch PPO），与 uav_demo 相互独立。
 
 

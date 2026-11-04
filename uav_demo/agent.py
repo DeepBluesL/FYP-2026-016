@@ -1,4 +1,4 @@
-"""DQN 算法：经验回放、epsilon-greedy、目标网络和模型保存。"""
+"""Double DQN：当前状态与学习预测特征、经验回放、目标网络。"""
 
 from dataclasses import asdict
 from pathlib import Path
@@ -8,7 +8,12 @@ import torch
 from torch import nn
 
 from .config import EnvConfig, TrainConfig
-from .environment import ACTIONS, ACTION_NAMES, GridWorldEnv
+from .environment import (
+    ACTIONS, ACTION_NAMES, GridWorldEnv,
+
+)
+from .observation import encode_observation
+from .prediction import forecast_vehicle
 from .model import QNetwork
 
 
@@ -54,10 +59,20 @@ class ReplayBuffer:
 
 
 class DQNAgent:
-    def __init__(self, observation_size: int, action_count: int, config: TrainConfig):
+    def __init__(self, observation_size: int, action_count: int, config: TrainConfig,
+                 motion_predictor=None, *, env_config: EnvConfig):
         self.config = config
         self.observation_size = observation_size
         self.action_count = action_count
+        self.motion_predictor = motion_predictor
+        self.env_config = env_config
+        self._prediction_cache = {}
+
+        self.network_input_size = observation_size + (
+            2 * len(config.prediction_steps)
+            if motion_predictor is not None else 0
+        )
+
         self.device = resolve_device(config.device)
         torch.set_num_threads(config.torch_threads)
         torch.manual_seed(config.seed)
@@ -69,8 +84,8 @@ class DQNAgent:
             "activation": config.activation,
             "leaky_relu_slope": config.leaky_relu_slope,
         }
-        self.online = QNetwork(observation_size, action_count, **network_options).to(self.device)
-        self.target = QNetwork(observation_size, action_count, **network_options).to(self.device)
+        self.online = QNetwork(self.network_input_size, action_count, **network_options).to(self.device)
+        self.target = QNetwork(self.network_input_size, action_count, **network_options).to(self.device)
         self.target.load_state_dict(self.online.state_dict())
         self.target.eval()
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=config.learning_rate)
@@ -78,6 +93,49 @@ class DQNAgent:
         self.replay = ReplayBuffer(config.replay_capacity, config.seed + 1)
         self.environment_steps = 0
         self.gradient_steps = 0
+
+    def predict_car(self, observation) -> np.ndarray | None:
+        if self.motion_predictor is None:
+            return None
+
+        cfg = self.env_config
+        state = observation
+        if not state["has_observation"]:
+            return None
+        steps = self.config.prediction_steps
+        age = state["observation_age"]
+        observed_time = state["time"] - age
+
+        key = (
+            tuple(state["car_pos"]),
+            tuple(state["car_velocity"]),
+            observed_time % cfg.car_move_every,
+            tuple(age + h for h in steps),
+        )
+
+        if key not in self._prediction_cache:
+            if len(self._prediction_cache) >= 50_000:
+                self._prediction_cache.clear()
+
+            self._prediction_cache[key] = forecast_vehicle(
+                self.motion_predictor, state, cfg, steps
+            )
+
+        return self._prediction_cache[key].copy()
+
+    def _features(self, observation):
+        features = encode_observation(observation, self.env_config, self.config.observation_features)
+        if self.motion_predictor is None:
+            return features
+        predicted = self.predict_car(observation)
+        if predicted is None:
+            relative = np.zeros((len(self.config.prediction_steps), 2), dtype=np.float32)
+        else:
+            scale = self.env_config.grid_size - 1
+            relative = predicted / scale - np.asarray(
+                [v / scale for v in observation["uav_pos"]], dtype=np.float32
+            )
+        return np.concatenate((features, relative.reshape(-1))).astype(np.float32)
 
     def choose_action(self, observation, epsilon: float = 0.0, mask=None) -> int:
         if not 0.0 <= epsilon <= 1.0:
@@ -91,12 +149,13 @@ class DQNAgent:
         if epsilon > 0.0 and self.rng.random() < epsilon:
             return int(self.rng.choice(np.flatnonzero(mask)))
         with torch.no_grad():
-            inputs = torch.as_tensor(observation, dtype=torch.float32, device=self.device)
+            inputs = torch.as_tensor(self._features(observation), dtype=torch.float32, device=self.device)
             q_values = self.online(inputs).cpu().numpy()
         return int(np.argmax(np.where(mask, q_values, -np.inf)))
 
     def remember(self, observation, action, reward, next_observation, done, next_mask):
-        self.replay.add(observation, action, reward, next_observation, done, next_mask)
+        self.replay.add(self._features(observation), action, reward,
+                        self._features(next_observation), done, next_mask)
         self.environment_steps += 1
 
     def update(self) -> float | None:
@@ -114,7 +173,8 @@ class DQNAgent:
         next_masks = torch.as_tensor(next_masks, dtype=torch.bool, device=self.device)
         predicted = self.online(observations).gather(1, actions[:, None]).squeeze(1)
         with torch.no_grad():
-            next_q = self.target(next_observations).masked_fill(~next_masks, -torch.inf).max(dim=1).values
+            next_actions = self.online(next_observations).masked_fill(~next_masks, -torch.inf).argmax(dim=1)
+            next_q = self.target(next_observations).gather(1, next_actions[:, None]).squeeze(1)
             # horizon 是任务的一部分，terminated 和 truncated 都不再 bootstrap。
             next_q = torch.where(dones, torch.zeros_like(next_q), next_q)
             expected = rewards + self.config.gamma * next_q
@@ -131,13 +191,19 @@ class DQNAgent:
     def save(self, path: str | Path, env_config: EnvConfig):
         """保存推理用模型及配置；回放池未保存，不提供断点续训语义。"""
         expected_env = GridWorldEnv(env_config)
-        if self.action_count != expected_env.action_count or self.observation_size != expected_env.observation_size:
+        if self.action_count != expected_env.action_count or self.observation_size != encode_observation(
+                expected_env.reset(seed=0)[0], env_config, self.config.observation_features).size:
             raise ValueError("模型输入或动作数量与保存的环境配置不一致，不能保存。")
+        if self.env_config is not None and self.env_config != env_config:
+            raise ValueError("预测特征使用的环境配置与保存配置不一致，不能保存。")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
-                "format_version": 2,
+                "format_version": 7,
+                "observation_mode": "delayed_vehicle",
+                "network_input_size": self.network_input_size,
+                "motion_predictor": self.motion_predictor.export_state() if self.motion_predictor is not None else None,
                 "observation_size": self.observation_size,
                 "action_count": self.action_count,
                 "action_names": list(ACTION_NAMES),
@@ -157,26 +223,27 @@ class DQNAgent:
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         if not isinstance(checkpoint, dict):
             raise ValueError("模型文件必须包含 checkpoint 字典。")
-        if checkpoint.get("format_version") == 1:
-            raise ValueError(
-                "旧版模型未保存动作定义，无法验证其与当前 8 向动作的兼容性；"
-                "请使用当前代码重新训练，不能直接沿用旧权重。"
-            )
-        if checkpoint.get("format_version") != 2:
-            raise ValueError("不支持的模型文件版本。")
+
+        if checkpoint.get("format_version") != 7:
+            raise ValueError("旧版模型与隐藏终点及有效观测标志不兼容，请重新训练。")
+        if checkpoint.get("observation_mode") != "delayed_vehicle":
+            raise ValueError("模型观测模式与当前车辆观测接口不兼容。")
+
         if (
-            checkpoint.get("action_count") != len(ACTIONS)
-            or checkpoint.get("action_names") != list(ACTION_NAMES)
-            or checkpoint.get("actions") != [list(action) for action in ACTIONS]
+                checkpoint.get("action_count") != len(ACTIONS)
+                or checkpoint.get("action_names") != list(ACTION_NAMES)
+                or checkpoint.get("actions") != [list(action) for action in ACTIONS]
         ):
             raise ValueError("模型的动作数量、顺序或动作定义与当前环境不兼容，请重新训练。")
         try:
-            env_config = EnvConfig(**checkpoint["env_config"])
+            env_values = dict(checkpoint["env_config"])
+            env_values.setdefault("progress_to_contact_boundary", False)
+            env_values.setdefault("movement_penalty", 0.0)
+            env_config = EnvConfig(**env_values)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("模型中的环境配置缺失或无效。") from error
         expected_env = GridWorldEnv(env_config)
-        if checkpoint.get("observation_size") != expected_env.observation_size:
-            raise ValueError("模型观测维度与保存的环境配置不一致，请重新训练。")
+
         try:
             train_values = dict(checkpoint["train_config"])
             # 必须显式保存结构，不能悄悄采用未来版本的新默认值。
@@ -187,9 +254,21 @@ class DQNAgent:
             train_config = TrainConfig(**train_values)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("模型中的网络或训练配置缺失或无效。") from error
-        agent = cls(
-            checkpoint["observation_size"], checkpoint["action_count"], train_config
-        )
+        expected_size = encode_observation(
+            expected_env.reset(seed=0)[0], env_config, train_config.observation_features
+        ).size
+        if checkpoint.get("observation_size") != expected_size:
+            raise ValueError("模型观测维度与保存的特征配置不一致，请重新训练。")
+        predictor = None
+
+        if checkpoint.get("motion_predictor") is not None:
+            from .prediction import MotionPredictor
+            predictor = MotionPredictor.from_state(checkpoint["motion_predictor"])
+        agent = cls(checkpoint["observation_size"], checkpoint["action_count"], train_config,
+                    motion_predictor=predictor, env_config=env_config)
+
+        if checkpoint.get("network_input_size") != agent.network_input_size:
+            raise ValueError("模型预测特征维度与网络输入不一致。")
         try:
             agent.online.load_state_dict(checkpoint["online_state_dict"])
             agent.target.load_state_dict(checkpoint["target_state_dict"])

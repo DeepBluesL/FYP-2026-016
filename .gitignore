@@ -3,8 +3,9 @@ tools/
 fyp_bot/
 .venv-weekly-report/
 
-# 运行时生成：训练结果、缓存
+# 运行时生成：训练结果、缓存、虚拟环境
 outputs/
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
+.venv/

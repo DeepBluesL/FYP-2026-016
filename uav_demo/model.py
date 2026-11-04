@@ -6,7 +6,7 @@ from .config import validate_network_settings
 
 
 class QNetwork(nn.Module):
-    """输入完整 Oracle 观测，输出各离散动作的 Q 值。"""
+    """输入当前状态及可选学习预测特征，输出各离散动作的 Q 值。"""
 
     def __init__(
         self,
