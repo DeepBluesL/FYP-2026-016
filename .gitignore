@@ -1,0 +1,10 @@
+# 与项目代码无关，不上传：飞书周报机器人及其运行环境
+tools/
+fyp_bot/
+.venv-weekly-report/
+
+# 运行时生成：训练结果、缓存
+outputs/
+__pycache__/
+*.pyc
+.pytest_cache/
