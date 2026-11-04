@@ -1,10 +1,10 @@
 """无障碍 GridWorld：采集车辆数据后，从左下角飞到右上角。
 
 使用 reset/step 五返回值约定，不依赖 Gymnasium。
-当前状态观测共 20 维，不暴露车辆未来轨迹。
+观测共 21 维，车辆信息可延迟，不暴露车辆未来轨迹。
 状态量依次为 UAV x/y、名义速度、UAV 终点 x/y、车辆当前 x/y、
 车辆终点 x/y、时间、采集进度、采集完成标志、采集失败标志，
-以及相对车辆/终点坐标、最近观测的车辆位移和移动时钟相位。
+以及相对车辆/终点坐标、最近观测的车辆位移、移动时钟相位和观测年龄。
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class GridWorldEnv:
 
     def __init__(self, config: EnvConfig | None = None):
         self.config = config if config is not None else EnvConfig()
-        self.observation_size = 20
+        self.observation_size = 21
         self.uav_pos = tuple(self.config.uav_start)
         self.uav_speed = self.config.initial_speed
         self.car_trajectory = np.empty((self.config.max_steps + 1, 2), dtype=np.int64)
@@ -65,6 +65,7 @@ class GridWorldEnv:
         self.sensing_complete = False
         self.sensing_failed = False
         self.car_velocity = (0, 0)  # 只能从已发生的位移观测方向，初始朝向未知。
+        self.car_observation_history = []
         self.travel_distance = 0.0
         self._done = True  # step 前必须先 reset。
 
@@ -91,6 +92,7 @@ class GridWorldEnv:
         self.sensing_complete = False
         self.sensing_failed = False
         self.car_velocity = (0, 0)
+        self.car_observation_history = [(self.car_pos, self.car_velocity)]
         self.travel_distance = 0.0
         self._done = False
         return self._observation(), self._info(invalid_move=False)
@@ -118,9 +120,12 @@ class GridWorldEnv:
         moved_distance = self._distance(old_position, self.uav_pos)
         self.travel_distance += moved_distance
         self.time += 1
+
         displacement = tuple(b - a for a, b in zip(old_car, self.car_pos))
         if any(displacement):
             self.car_velocity = displacement
+        self.car_observation_history.append((self.car_pos, self.car_velocity))
+
         new_target = config.uav_goal if finished_before else self.car_pos
         new_distance = self._distance(self.uav_pos, new_target)
         if not finished_before and config.progress_to_contact_boundary:
@@ -167,7 +172,12 @@ class GridWorldEnv:
 
     def _observation(self) -> np.ndarray:
         scale = self.config.grid_size - 1
-        car_x, car_y = self.car_pos
+
+        observation_time = max(0, self.time - self.config.observation_delay)
+        observed_pos, observed_velocity = self.car_observation_history[observation_time]
+        car_x, car_y = observed_pos
+        observation_age = self.time - observation_time
+
         return np.asarray((
             self.uav_pos[0] / scale, self.uav_pos[1] / scale,
             self.uav_speed / 2,
@@ -182,8 +192,10 @@ class GridWorldEnv:
             (car_y - self.uav_pos[1]) / scale,
             (self.config.uav_goal[0] - self.uav_pos[0]) / scale,
             (self.config.uav_goal[1] - self.uav_pos[1]) / scale,
-            float(self.car_velocity[0]), float(self.car_velocity[1]),
+
+            float(observed_velocity[0]), float(observed_velocity[1]),
             (self.time % self.config.car_move_every) / self.config.car_move_every,
+            observation_age / self.config.max_steps, #归一化
         ), dtype=np.float32)
 
     def _info(self, invalid_move: bool) -> dict:

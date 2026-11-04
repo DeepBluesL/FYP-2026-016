@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 import math
 
-
 ACTIVATION_NAMES = ("relu", "leaky_relu", "tanh", "silu")
 
 
@@ -16,10 +15,10 @@ def validate_network_settings(hidden_sizes, activation, leaky_relu_slope) -> tup
     if activation not in ACTIVATION_NAMES:
         raise ValueError(f"activation 必须是 {ACTIVATION_NAMES} 中的一种")
     if (
-        isinstance(leaky_relu_slope, bool)
-        or not isinstance(leaky_relu_slope, (int, float))
-        or not math.isfinite(leaky_relu_slope)
-        or not 0 <= leaky_relu_slope <= 1
+            isinstance(leaky_relu_slope, bool)
+            or not isinstance(leaky_relu_slope, (int, float))
+            or not math.isfinite(leaky_relu_slope)
+            or not 0 <= leaky_relu_slope <= 1
     ):
         raise ValueError("leaky_relu_slope 必须是 [0, 1] 内的有限数")
     return tuple(hidden_sizes)
@@ -28,12 +27,13 @@ def validate_network_settings(hidden_sizes, activation, leaky_relu_slope) -> tup
 @dataclass
 class EnvConfig:
     grid_size: int = 50
-    max_steps: int = 300
+    max_steps: int = 150
     uav_start: tuple[int, int] = (0, 0)
     uav_goal: tuple[int, int] = (49, 49)
     initial_speed: int = 1
 
     car_move_every: int = 1  # 每隔多少个环境步移动 1 格；1 为每步一格，2 为两步一格
+    observation_delay: int = 0  # 车辆的延迟观测环境step
     car_spawn_region: str = "bottom_right"  # 兼容旧 checkpoint 的字段；当前统一固定右下角，随机起点逻辑已注释
     car_straight_prob: float = 0.65
     car_turn_prob: float = 0.15  # 左、右转各自的基础概率
@@ -59,42 +59,62 @@ class EnvConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.grid_size, int) or self.grid_size < 5:
             raise ValueError("grid_size 必须是 >= 5 的整数")
+
         if not isinstance(self.max_steps, int) or self.max_steps < 1:
             raise ValueError("max_steps 必须是正整数")
+
         if not isinstance(self.car_move_every, int) or self.car_move_every < 1:
             raise ValueError("car_move_every 必须是正整数")
+
+        if (isinstance(self.observation_delay, bool)
+                or not isinstance(self.observation_delay, int)
+                or self.observation_delay < 0
+        ):raise ValueError('Observation_delay have to be non-negative number')
+
         if self.car_spawn_region not in ("bottom_right", "mixed"):
             raise ValueError("car_spawn_region 只能取 bottom_right 或 mixed")
+
         if self.max_steps // self.car_move_every < 2 * (self.grid_size - 1):
             raise ValueError("时间上限太短：需保证车辆可从任意起点到达终点")
         for name in ("uav_start", "uav_goal"):
             position = tuple(getattr(self, name))  # JSON 的 list 也可还原
             if len(position) != 2 or any(
-                not isinstance(v, int) or not 0 <= v < self.grid_size for v in position
+                    not isinstance(v, int) or not 0 <= v < self.grid_size for v in position
             ):
                 raise ValueError(f"{name} 必须是地图内的整数坐标")
             setattr(self, name, position)
+
         if self.initial_speed not in (1, 2):
             raise ValueError("initial_speed 只能取 1 或 2")
         probabilities = (self.car_straight_prob, self.car_turn_prob, self.car_reverse_prob)
+
         if any(not math.isfinite(p) or p <= 0 for p in probabilities):
             raise ValueError("车辆各基础转向概率必须为有限正数")
+
         if not math.isclose(self.car_straight_prob + 2 * self.car_turn_prob + self.car_reverse_prob, 1.0):
             raise ValueError("直行 + 左转 + 右转 + 掉头的基础概率之和必须为 1")
+
         if not math.isfinite(self.car_goal_bias) or not 0 <= self.car_goal_bias <= 20:
             raise ValueError("car_goal_bias 必须在 [0, 20] 范围内")
+
         if not math.isfinite(self.sensing_radius) or self.sensing_radius < 0:
             raise ValueError("sensing_radius 必须是非负有限数")
+
         if not isinstance(self.sensing_steps, int) or not 1 <= self.sensing_steps <= self.max_steps:
             raise ValueError("sensing_steps 必须为 1 到 max_steps 之间的整数")
+
         if self.sensing_mode not in ("consecutive", "cumulative"):
             raise ValueError("sensing_mode 只能取 consecutive 或 cumulative")
+
         if not math.isfinite(self.sensing_failure_penalty) or self.sensing_failure_penalty >= 0:
             raise ValueError("sensing_failure_penalty 必须是有限负数")
+
         if not 0 <= self.failed_return_progress_scale <= 1:
             raise ValueError("failed_return_progress_scale 必须在 [0, 1] 内")
+
         if not isinstance(self.progress_to_contact_boundary, bool):
             raise ValueError("progress_to_contact_boundary 必须为布尔值")
+
         if not math.isfinite(self.movement_penalty) or self.movement_penalty > 0:
             raise ValueError("movement_penalty 必须是有限非正数")
 
@@ -154,7 +174,8 @@ class TrainConfig:
             raise ValueError("gamma 必须在 [0, 1] 范围内")
         if not 0 <= self.epsilon_end <= self.epsilon_start <= 1:
             raise ValueError("epsilon 必须满足 0 <= end <= start <= 1")
-        training_routes = max(self.episodes, self.prediction_route_count) if self.use_motion_prediction else self.episodes
+        training_routes = max(self.episodes,
+                              self.prediction_route_count) if self.use_motion_prediction else self.episodes
         if self.seed < 0 or self.eval_seed < self.seed + training_routes:
             raise ValueError("训练种子必须非负，且训练/验证种子区间不能重叠")
         if self.device not in ("cpu", "cuda", "auto"):

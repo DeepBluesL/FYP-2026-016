@@ -174,6 +174,12 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/train"))
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default=defaults.device)
     parser.add_argument("--sensing-mode", choices=("consecutive", "cumulative"), default=EnvConfig().sensing_mode)
+    parser.add_argument(
+        "--observation-delay",
+        type=int,
+        default=EnvConfig().observation_delay,
+        help="车辆位置观测延迟的环境步数，0 表示实时观测",
+    )
     parser.add_argument("--eval-every", type=int, default=defaults.eval_every)
     parser.add_argument("--eval-episodes", type=int, default=defaults.eval_episodes)
     parser.add_argument("--learning-starts", type=int, default=defaults.learning_starts)
@@ -200,7 +206,11 @@ def main():
         prediction_routes=args.prediction_routes, prediction_epochs=args.prediction_epochs,
         epsilon_decay_steps=args.epsilon_decay_steps,
     )
-    train(EnvConfig(sensing_mode=args.sensing_mode), config, args.output_dir)
+    env_config = EnvConfig(
+        sensing_mode=args.sensing_mode,
+        observation_delay=args.observation_delay,
+    )
+    train(env_config, config, args.output_dir)
 
 
 if __name__ == "__main__":
