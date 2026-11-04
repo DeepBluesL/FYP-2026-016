@@ -13,7 +13,7 @@ from uav_demo.model import QNetwork
 class NetworkTests(unittest.TestCase):
     def test_default_has_three_hidden_layers_and_leaky_relu(self):
         config = TrainConfig()
-        inputs = GridWorldEnv().observation_size
+        inputs = 20
         network = QNetwork(inputs, 17, config.hidden_sizes, config.activation, config.leaky_relu_slope)
         linear_layers = [layer for layer in network.layers if isinstance(layer, nn.Linear)]
         activations = [layer for layer in network.layers if isinstance(layer, nn.LeakyReLU)]

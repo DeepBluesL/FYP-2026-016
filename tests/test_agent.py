@@ -5,14 +5,18 @@ from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
 
+from uav_demo.observation import encode_observation
 from uav_demo.agent import DQNAgent
 from uav_demo.config import EnvConfig, TrainConfig
 from uav_demo.environment import GridWorldEnv
 
+
+OBSERVATION_SIZE = 20  # 默认编码顺序的回归约定
 
 class DQNTests(unittest.TestCase):
     def config(self, **changes):
@@ -29,12 +33,12 @@ class DQNTests(unittest.TestCase):
         return folder
 
     def test_masked_actions_and_greedy_does_not_consume_randomness(self):
-        agent = DQNAgent(2, 3, self.config())
+        agent = DQNAgent(20, 3, self.config(), env_config=EnvConfig())
         with torch.no_grad():
             for parameter in agent.online.parameters():
                 parameter.zero_()
             agent.online.layers[-1].bias.copy_(torch.tensor([100.0, 2.0, 1.0]))
-        observation = np.zeros(2, dtype=np.float32)
+        observation = GridWorldEnv().reset(seed=42)[0]
         mask = np.asarray([False, True, True])
         rng_before = deepcopy(agent.rng.bit_generator.state)
         self.assertEqual(agent.choose_action(observation, 0.0, mask), 1)
@@ -43,13 +47,13 @@ class DQNTests(unittest.TestCase):
             self.assertIn(agent.choose_action(observation, 1.0, mask), (1, 2))
 
     def test_target_ignores_invalid_next_actions_and_terminal_bootstrap(self):
-        agent = DQNAgent(2, 3, self.config(gamma=0.5))
+        agent = DQNAgent(20, 3, self.config(gamma=0.5), env_config=EnvConfig())
         with torch.no_grad():
             for network in (agent.online, agent.target):
                 for parameter in network.parameters():
                     parameter.zero_()
             agent.target.layers[-1].bias.copy_(torch.tensor([100.0, 2.0, 0.0]))
-        observation = np.zeros(2, dtype=np.float32)
+        observation = GridWorldEnv().reset(seed=42)[0]
         mask = np.asarray([False, True, True])
         agent.remember(observation, 1, 1.0, observation, False, mask)
         agent.remember(observation, 1, 1.0, observation, True, mask)
@@ -57,7 +61,7 @@ class DQNTests(unittest.TestCase):
         self.assertAlmostEqual(agent.update(), 1.0, places=6)
 
     def test_double_dqn_selects_online_action_but_uses_target_value(self):
-        agent = DQNAgent(2, 3, self.config(gamma=0.5))
+        agent = DQNAgent(20, 3, self.config(gamma=0.5), env_config=EnvConfig())
         with torch.no_grad():
             for network in (agent.online, agent.target):
                 for parameter in network.parameters():
@@ -65,7 +69,7 @@ class DQNTests(unittest.TestCase):
             # online 选择合法动作 1；target 的最大值在 2，不能用它来选动作。
             agent.online.layers[-1].bias.copy_(torch.tensor([100.0, 3.0, 0.0]))
             agent.target.layers[-1].bias.copy_(torch.tensor([100.0, 2.0, 10.0]))
-        observation = np.zeros(2, dtype=np.float32)
+        observation = GridWorldEnv().reset(seed=42)[0]
         mask = np.asarray([False, True, True])
         for _ in range(2):
             agent.remember(observation, 2, 1.0, observation, False, mask)
@@ -73,8 +77,8 @@ class DQNTests(unittest.TestCase):
         self.assertAlmostEqual(agent.update(), 1.5, places=6)
 
     def test_gradient_update_changes_weights_and_syncs_target(self):
-        agent = DQNAgent(2, 3, self.config(target_update_every=1))
-        observation = np.ones(2, dtype=np.float32)
+        agent = DQNAgent(20, 3, self.config(target_update_every=1), env_config=EnvConfig())
+        observation = GridWorldEnv().reset(seed=42)[0]
         mask = np.ones(3, dtype=bool)
         for _ in range(2):
             agent.remember(observation, 1, 5.0, observation, True, mask)
@@ -91,10 +95,10 @@ class DQNTests(unittest.TestCase):
         env = GridWorldEnv(env_config)
         observation, _ = env.reset(seed=789)
         architecture = self.config(hidden_sizes=(12, 7), activation="tanh", leaky_relu_slope=0.2)
-        agent = DQNAgent(env.observation_size, env.action_count, architecture)
+        agent = DQNAgent(20, env.action_count, architecture, env_config=env.config)
         mask = env.valid_action_mask()
         with torch.no_grad():
-            original_q = agent.online(torch.from_numpy(observation)).clone()
+            original_q = agent.online(torch.from_numpy(agent._features(observation))).clone()
         # 在仓库 outputs 内创建临时目录，兼容 Windows 沙箱的可写范围。
         temporary_root = (Path(__file__).resolve().parents[1] / "outputs" / "tests").resolve()
         temporary_root.mkdir(parents=True, exist_ok=True)
@@ -109,7 +113,7 @@ class DQNTests(unittest.TestCase):
         self.assertEqual(loaded.config.leaky_relu_slope, 0.2)
         self.assertEqual(loaded.choose_action(observation, mask=mask), agent.choose_action(observation, mask=mask))
         with torch.no_grad():
-            self.assertTrue(torch.equal(original_q, loaded.online(torch.from_numpy(observation))))
+            self.assertTrue(torch.equal(original_q, loaded.online(torch.from_numpy(loaded._features(observation)))))
 
     def test_prediction_features_and_policy_survive_checkpoint_roundtrip(self):
         from uav_demo.prediction import MotionPredictor
@@ -117,15 +121,18 @@ class DQNTests(unittest.TestCase):
         env = GridWorldEnv()
         observation, _ = env.reset(seed=789)
         predictor = MotionPredictor()
-        agent = DQNAgent(env.observation_size, env.action_count, self.config(),
+        config = self.config(prediction_steps=(0, 1, 4, 8))
+        agent = DQNAgent(20, env.action_count, config,
                          motion_predictor=predictor, env_config=env.config)
-        self.assertEqual(agent.network_input_size, 26)
+        input_size = OBSERVATION_SIZE + 2 * len(config.prediction_steps)
+        self.assertEqual(agent.network_input_size, input_size)
         features = agent._features(observation)
-        self.assertEqual(features.shape, (26,))
-        np.testing.assert_array_equal(features[:20], observation)
+        self.assertEqual(features.shape, (input_size,))
+        np.testing.assert_array_equal(features[:OBSERVATION_SIZE], encode_observation(observation, env.config))
         forecast = agent.predict_car(observation)
         np.testing.assert_allclose(
-            features[20:].reshape(3, 2), forecast / (env.config.grid_size - 1) - observation[:2],
+            features[OBSERVATION_SIZE:].reshape(-1, 2),
+            forecast / (env.config.grid_size - 1) - np.asarray(observation["uav_pos"]) / (env.config.grid_size - 1),
         )
         with torch.no_grad():
             original_q = agent.online(torch.from_numpy(features)).clone()
@@ -134,7 +141,8 @@ class DQNTests(unittest.TestCase):
             agent.save(path, env.config)
             loaded, restored_config = DQNAgent.load(path)
         self.assertEqual(restored_config, env.config)
-        self.assertEqual(loaded.network_input_size, 26)
+        self.assertEqual(loaded.network_input_size, input_size)
+        self.assertEqual(loaded.config.prediction_steps, config.prediction_steps)
         np.testing.assert_array_equal(loaded.predict_car(observation), forecast)
         with torch.no_grad():
             torch.testing.assert_close(loaded.online(torch.from_numpy(loaded._features(observation))), original_q)
@@ -154,14 +162,14 @@ class DQNTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "旧版模型.*重新训练"):
                         DQNAgent.load(path)
 
-    def test_v2_v3_checkpoints_rejected_for_old_observation_semantics(self):
+    def test_older_checkpoints_rejected_for_old_observation_semantics(self):
         env = GridWorldEnv()
-        agent = DQNAgent(env.observation_size, env.action_count, self.config())
+        agent = DQNAgent(20, env.action_count, self.config(), env_config=env.config)
         with self.temporary_directory() as folder:
             path = Path(folder) / "legacy.pt"
             agent.save(path, env.config)
             checkpoint = torch.load(path, weights_only=True)
-            for version in (2, 3):
+            for version in (2, 3, 4, 5, 6):
                 with self.subTest(version=version):
                     checkpoint["format_version"] = version
                     torch.save(checkpoint, path)
@@ -170,7 +178,7 @@ class DQNTests(unittest.TestCase):
 
     def test_old_v4_reward_fields_keep_original_environment_semantics(self):
         env = GridWorldEnv()
-        agent = DQNAgent(env.observation_size, env.action_count, self.config())
+        agent = DQNAgent(20, env.action_count, self.config(), env_config=env.config)
         with self.temporary_directory() as folder:
             path = Path(folder) / "legacy_reward_v4.pt"
             agent.save(path, env.config)
@@ -184,19 +192,19 @@ class DQNTests(unittest.TestCase):
 
     def test_checkpoint_validates_action_semantics_observation_and_structure(self):
         env = GridWorldEnv()
-        agent = DQNAgent(env.observation_size, env.action_count, self.config())
+        agent = DQNAgent(20, env.action_count, self.config(), env_config=env.config)
         with self.temporary_directory() as folder:
             path = Path(folder) / "model.pt"
             agent.save(path, env.config)
             original = torch.load(path, weights_only=True)
-            self.assertEqual(original["format_version"], 4)
+            self.assertEqual(original["format_version"], 7)
             cases = (
                 ("count", "action_count", 9, "动作数量"),
                 ("reordered_names", "action_names", original["action_names"][::-1], "动作数量"),
                 ("reordered_vectors", "actions", original["actions"][::-1], "动作数量"),
-                ("observation", "observation_size", env.observation_size + 1, "观测维度"),
+                ("observation", "observation_size", 20 + 1, "观测维度"),
                 ("observation_mode", "observation_mode", "oracle", "观测模式"),
-                ("prediction_features", "network_input_size", 26, "预测特征维度"),
+                ("prediction_features", "network_input_size", original["network_input_size"] + 2, "预测特征维度"),
             )
             for name, key, value, message in cases:
                 with self.subTest(case=name):
@@ -223,12 +231,72 @@ class DQNTests(unittest.TestCase):
     def test_save_rejects_model_environment_dimension_mismatch(self):
         with self.temporary_directory() as folder:
             path = Path(folder) / "invalid.pt"
-            for observation_size, action_count in ((GridWorldEnv().observation_size, 9), (2, 17)):
+            for observation_size, action_count in ((20, 9), (2, 17)):
                 with self.subTest(observation_size=observation_size, action_count=action_count):
-                    agent = DQNAgent(observation_size, action_count, self.config())
+                    agent = DQNAgent(observation_size, action_count, self.config(), env_config=EnvConfig())
                     with self.assertRaisesRegex(ValueError, "不能保存"):
                         agent.save(path, EnvConfig())
                     self.assertFalse(path.exists())
+
+    def test_selected_feature_order_and_checkpoint_roundtrip(self):
+        env = GridWorldEnv(EnvConfig(observation_delay=3))
+        observation, _ = env.reset(seed=42)
+        for names, size in ((('time', 'uav_pos', 'has_observation'), 4),
+                            (('uav_pos', 'time', 'car_velocity', 'has_observation'), 6)):
+            with self.subTest(names=names):
+                config = self.config(observation_features=names)
+                encoded = encode_observation(observation, env.config, names)
+                self.assertEqual(encoded.size, size)
+                agent = DQNAgent(encoded.size, env.action_count, config, env_config=env.config)
+                observation_later, *_ = env.step(1)
+                np.testing.assert_array_equal(agent._features(observation_later),
+                    encode_observation(observation_later, env.config, names))
+                with self.temporary_directory() as folder:
+                    path = Path(folder) / 'selected.pt'
+                    agent.save(path, env.config)
+                    loaded, _ = DQNAgent.load(path)
+                self.assertEqual(loaded.config.observation_features, names)
+                self.assertEqual(loaded.network_input_size, size)
+                self.assertEqual(loaded.choose_action(observation_later),
+                                 agent.choose_action(observation_later))
+
+    def test_v7_without_feature_names_uses_original_order(self):
+        env = GridWorldEnv()
+        observation, _ = env.reset(seed=42)
+        agent = DQNAgent(20, env.action_count, self.config(), env_config=env.config)
+        with self.temporary_directory() as folder:
+            path = Path(folder) / 'legacy_v7.pt'
+            agent.save(path, env.config)
+            checkpoint = torch.load(path, weights_only=True)
+            del checkpoint['train_config']['observation_features']
+            torch.save(checkpoint, path)
+            loaded, _ = DQNAgent.load(path)
+        np.testing.assert_array_equal(loaded._features(observation), agent._features(observation))
+
+    def test_missing_report_keeps_features_fixed_size_and_skips_prediction(self):
+        from uav_demo.prediction import MotionPredictor
+
+        env = GridWorldEnv(EnvConfig(observation_delay=3, uav_start=(3, 2)))
+        observation, _ = env.reset(seed=42)
+        predictor = MotionPredictor()
+        agent = DQNAgent(20, env.action_count,
+                         self.config(prediction_steps=(0, 1, 4, 8)),
+                         motion_predictor=predictor, env_config=env.config)
+        mask = env.valid_action_mask()
+        with patch.object(predictor, "predict_positions", side_effect=AssertionError("no report")):
+            self.assertIsNone(agent.predict_car(observation))
+            features = agent._features(observation)
+            self.assertEqual(features.shape, (OBSERVATION_SIZE + 8,))
+            np.testing.assert_array_equal(features[OBSERVATION_SIZE:], 0)
+            self.assertTrue(mask[agent.choose_action(observation, mask=mask)])
+            self.assertFalse(agent._prediction_cache)
+        for _ in range(3):
+            next_observation, reward, terminated, truncated, _ = env.step(0)
+            agent.remember(observation, 0, reward, next_observation,
+                           terminated or truncated, env.valid_action_mask())
+            observation = next_observation
+        self.assertEqual(agent.predict_car(observation).shape, (4, 2))
+        self.assertTrue(np.isfinite(agent.update()))
 
 
 if __name__ == "__main__":

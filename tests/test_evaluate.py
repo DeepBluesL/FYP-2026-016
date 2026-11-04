@@ -8,6 +8,18 @@ from uav_demo.environment import ACTION_NAMES, GridWorldEnv
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_first_observation_metrics(self):
+        class HoverAgent:
+            def choose_action(self, observation, epsilon, mask):
+                return 0
+        for delay, first_report, unobserved in ((0, 0, 0), (3, 3, 3), (9, None, 8)):
+            with self.subTest(delay=delay):
+                env = GridWorldEnv(EnvConfig(grid_size=5, max_steps=8,
+                    uav_goal=(4, 4), observation_delay=delay))
+                result = evaluate_episode(HoverAgent(), env, seed=3_000_000)
+                self.assertEqual(result['first_observation_step'], first_report)
+                self.assertEqual(result['unobserved_steps'], unobserved)
+
     def test_early_goal_includes_initial_position(self):
         class ScriptedAgent:
             def __init__(self):

@@ -12,6 +12,11 @@ from uav_demo.environment import GridWorldEnv
 from uav_demo.planner import OraclePlanner
 
 
+def make_record(observation, info, action=None, reward=0.0):
+    return {**info, "observation": dict(observation), "action": action,
+            "reward": reward, "car_prediction": None, "prediction_steps": []}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="50x50 UAV / car：学习策略与独立 Oracle 对照")
     parser.add_argument("--policy", choices=("oracle", "dqn", "predictive"), default="dqn")
@@ -44,31 +49,41 @@ def main() -> None:
 
     env = GridWorldEnv(config)
     observation, info = env.reset(seed=args.seed)
-    records = [{**info, "action": None, "reward": 0.0}]
-    if args.policy != "oracle":
-        predicted = agent.predict_car(observation)
-        records[-1]["car_prediction"] = predicted.tolist() if predicted is not None else None
+    records = [make_record(observation, info)]
     total_reward = 0.0
     while True:
+        predicted, prediction_steps = None, []
         if args.policy == "oracle":
             action = agent.choose_action(env)
         elif controller is not None:
             action = controller.choose_action(observation, env.valid_action_mask())
+            predicted = controller.last_predictions
+            if predicted is not None:
+                prediction_steps = list(range(len(predicted)))
         else:
             action = agent.choose_action(observation, epsilon=0.0, mask=env.valid_action_mask())
+            predicted = agent.predict_car(observation)
+            if predicted is not None:
+                prediction_steps = list(agent.config.prediction_steps)
+        records[-1]["car_prediction"] = predicted.tolist() if predicted is not None else None
+        records[-1]["prediction_steps"] = prediction_steps
         observation, reward, terminated, truncated, info = env.step(action)
         total_reward += reward
-        records.append({**info, "action": action, "reward": reward})
-        if args.policy != "oracle":
-            predicted = agent.predict_car(observation)
-            records[-1]["car_prediction"] = predicted.tolist() if predicted is not None else None
+        records.append(make_record(observation, info, action, reward))
         if terminated or truncated:
             break
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summary = {
         "policy": "oracle_heuristic" if args.policy == "oracle" else args.policy,
-        "observation_mode": "full_route_oracle" if args.policy == "oracle" else "current_state",
+        "observation_mode": "full_route_oracle" if args.policy == "oracle" else "delayed_vehicle",
+        "observation_delay": config.observation_delay,
+        "known_car_goal": args.policy == "oracle",
+        "prediction_steps": (list(range(controller.horizon + config.sensing_steps))
+                             if controller is not None else
+                             list(agent.config.prediction_steps)
+                             if args.policy == "dqn" and agent.motion_predictor is not None else []),
+        "observation_features": list(agent.config.observation_features) if args.policy != "oracle" else [],
         "learned_motion_prediction": args.policy != "oracle" and agent.motion_predictor is not None,
         "seed": args.seed,
         "success": info["success"],

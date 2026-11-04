@@ -28,15 +28,20 @@ def evaluate_episode(agent, env, seed: int, controller=None) -> dict:
     observation, info = env.reset(seed=seed)
     if controller is not None:
         controller.reset()
+    first_observation_step = observation["time"] if observation["has_observation"] else None
+    unobserved_steps = 0
     first_contact = 0 if info["contact"] else None
     sensing_complete_step, pre_contact_hover_steps, hover_streak = None, 0, 0
     early_goal = info["uav_reached_goal"] and not info["sensing_finished"]
     waiting_contact, total_reward = False, 0.0
     while True:
+        unobserved_steps += int(not observation["has_observation"])
         old_position = tuple(info["uav_pos"])
         action = (agent.choose_action(observation, epsilon=0.0, mask=env.valid_action_mask())
                   if controller is None else controller.choose_action(observation, env.valid_action_mask()))
         observation, reward, terminated, truncated, info = env.step(action)
+        if first_observation_step is None and observation["has_observation"]:
+            first_observation_step = observation["time"]
         total_reward += reward
         stationary_hover = action == 0 and tuple(info["uav_pos"]) == old_position
         if first_contact is None:
@@ -50,7 +55,8 @@ def evaluate_episode(agent, env, seed: int, controller=None) -> dict:
             sensing_complete_step = info["time"]
         early_goal |= info["uav_reached_goal"] and not info["sensing_finished"]
         if terminated or truncated:
-            return {"seed": seed, "success": info["success"],
+            return {"first_observation_step": first_observation_step, "unobserved_steps": unobserved_steps,
+                    "seed": seed, "success": info["success"],
                     "sensing_failed": info["sensing_failed"], "sensing_complete": info["sensing_complete"],
                     "uav_reached_goal": info["uav_reached_goal"], "steps": info["time"],
                     "travel_distance": info["travel_distance"], "total_reward": total_reward,
@@ -83,6 +89,12 @@ def main() -> None:
     rate = lambda field: sum(bool(row[field]) for row in rows) / len(rows)
     successful = [row for row in rows if row["success"]]
     summary = {"policy": args.policy, "known_future": False, "checkpoint": str(args.checkpoint.resolve()),
+               "known_car_goal": False, "observation_delay": config.observation_delay,
+               "prediction_steps": (list(range(controller.horizon + config.sensing_steps))
+                                    if controller is not None else
+                                    list(agent.config.prediction_steps) if agent.motion_predictor is not None else []),
+               "observation_features": list(agent.config.observation_features),
+               "planning_horizon": controller.horizon if controller is not None else None,
                "motion_prediction": agent.motion_predictor is not None, "episodes": len(rows),
                "seed_start": args.seed, "seed_end_inclusive": args.seed + args.episodes - 1,
                "success_rate": rate("success"), "sensing_completion_rate": rate("sensing_complete"),

@@ -1,10 +1,7 @@
 """无障碍 GridWorld：采集车辆数据后，从左下角飞到右上角。
 
 使用 reset/step 五返回值约定，不依赖 Gymnasium。
-观测共 21 维，车辆信息可延迟，不暴露车辆未来轨迹。
-状态量依次为 UAV x/y、名义速度、UAV 终点 x/y、车辆当前 x/y、
-车辆终点 x/y、时间、采集进度、采集完成标志、采集失败标志，
-以及相对车辆/终点坐标、最近观测的车辆位移、移动时钟相位和观测年龄。
+观测返回命名字段，隐藏车辆终点；首次报告到达前不提供车辆位置和方向。
 """
 
 from __future__ import annotations
@@ -15,6 +12,7 @@ import numpy as np
 
 from .config import EnvConfig
 from .vehicle import generate_vehicle_trajectory
+
 
 # 第三个量为网格步长（名义速度）：斜向实际距离为步长的 sqrt(2) 倍。
 # 0 仅用于 hover，悬停时保留之前的名义速度。
@@ -41,6 +39,7 @@ def preview_move(
         raise ValueError(f"action 必须是 0..{len(ACTIONS) - 1} 的整数。")
     if not 0 <= action < len(ACTIONS):
         raise ValueError(f"action 必须是 0..{len(ACTIONS) - 1} 的整数。")
+
     dx, dy, target_speed = ACTIONS[action]
     new_speed = speed if action == 0 else target_speed
     candidate = (position[0] + dx * new_speed, position[1] + dy * new_speed)
@@ -55,7 +54,6 @@ class GridWorldEnv:
 
     def __init__(self, config: EnvConfig | None = None):
         self.config = config if config is not None else EnvConfig()
-        self.observation_size = 21
         self.uav_pos = tuple(self.config.uav_start)
         self.uav_speed = self.config.initial_speed
         self.car_trajectory = np.empty((self.config.max_steps + 1, 2), dtype=np.int64)
@@ -80,7 +78,7 @@ class GridWorldEnv:
         point = self.car_trajectory[self.time]
         return int(point[0]), int(point[1])
 
-    def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict]:
+    def reset(self, seed: int | None = None) -> tuple[dict, dict]:
         """重置环境，seed 固定时生成相同车辆路线。"""
         self.car_trajectory, self.car_goal = generate_vehicle_trajectory(
             self.config, np.random.default_rng(seed)
@@ -104,7 +102,7 @@ class GridWorldEnv:
             for action in range(self.action_count)
         ], dtype=np.bool_)
 
-    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
+    def step(self, action: int) -> tuple[dict, float, bool, bool, dict]:
         if self._done:
             raise RuntimeError("请先 reset；结束的回合不能继续 step。")
         config = self.config
@@ -170,36 +168,32 @@ class GridWorldEnv:
         """采集、距离塑形与累计路程均使用欧氏距离；斜向路程含 sqrt(2)。"""
         return float(np.hypot(first[0] - second[0], first[1] - second[1]))
 
-    def _observation(self) -> np.ndarray:
-        scale = self.config.grid_size - 1
-
-        observation_time = max(0, self.time - self.config.observation_delay)
-        observed_pos, observed_velocity = self.car_observation_history[observation_time]
-        car_x, car_y = observed_pos
-        observation_age = self.time - observation_time
-
-        return np.asarray((
-            self.uav_pos[0] / scale, self.uav_pos[1] / scale,
-            self.uav_speed / 2,
-            self.config.uav_goal[0] / scale, self.config.uav_goal[1] / scale,
-            car_x / scale, car_y / scale,
-            self.car_goal[0] / scale, self.car_goal[1] / scale,
-            self.time / self.config.max_steps,
-            self.sensing_progress / self.config.sensing_steps,
-            float(self.sensing_complete),
-            float(self.sensing_failed),
-            (car_x - self.uav_pos[0]) / scale,
-            (car_y - self.uav_pos[1]) / scale,
-            (self.config.uav_goal[0] - self.uav_pos[0]) / scale,
-            (self.config.uav_goal[1] - self.uav_pos[1]) / scale,
-
-            float(observed_velocity[0]), float(observed_velocity[1]),
-            (self.time % self.config.car_move_every) / self.config.car_move_every,
-            observation_age / self.config.max_steps, #归一化
-        ), dtype=np.float32)
+    def _observation(self) -> dict:
+        observation_time = self.time - self.config.observation_delay
+        has_observation = observation_time >= 0
+        if has_observation:
+            position, velocity = self.car_observation_history[observation_time]
+            car_pos = tuple(int(v) for v in position)
+            car_velocity = tuple(int(v) for v in velocity)
+        else:
+            car_pos, car_velocity = None, None
+        return {
+            "uav_pos": tuple(self.uav_pos),
+            "uav_speed": self.uav_speed,
+            "uav_goal": tuple(self.config.uav_goal),
+            "car_pos": car_pos,
+            "car_velocity": car_velocity,
+            "time": self.time,
+            "sensing_progress": self.sensing_progress,
+            "sensing_complete": self.sensing_complete,
+            "sensing_failed": self.sensing_failed,
+            "observation_age": self.time - observation_time if has_observation else 0,
+            "has_observation": has_observation,
+        }
 
     def _info(self, invalid_move: bool) -> dict:
         contact = self._distance(self.uav_pos, self.car_pos) <= self.config.sensing_radius
+        observed = self._observation()
         return {
             "time": int(self.time),
             "success": bool(self.sensing_complete and self.uav_pos == tuple(self.config.uav_goal)),
@@ -215,6 +209,10 @@ class GridWorldEnv:
             "car_pos": list(self.car_pos),
             "car_goal": list(self.car_goal),
             "car_velocity": list(self.car_velocity),
+            # 真值仅用于评估/回放；策略使用 observation 中的报告。
+            "has_observation": observed["has_observation"],
+            "observed_car_pos": list(observed["car_pos"]) if observed["has_observation"] else None,
+            "observation_age": observed["observation_age"],
             "travel_distance": float(self.travel_distance),
             "contact": bool(contact),
             "invalid_move": bool(invalid_move),

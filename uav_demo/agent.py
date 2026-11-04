@@ -8,7 +8,12 @@ import torch
 from torch import nn
 
 from .config import EnvConfig, TrainConfig
-from .environment import ACTIONS, ACTION_NAMES, GridWorldEnv
+from .environment import (
+    ACTIONS, ACTION_NAMES, GridWorldEnv,
+
+)
+from .observation import encode_observation
+from .prediction import forecast_vehicle
 from .model import QNetwork
 
 
@@ -55,7 +60,7 @@ class ReplayBuffer:
 
 class DQNAgent:
     def __init__(self, observation_size: int, action_count: int, config: TrainConfig,
-                 motion_predictor=None, env_config: EnvConfig | None = None):
+                 motion_predictor=None, *, env_config: EnvConfig):
         self.config = config
         self.observation_size = observation_size
         self.action_count = action_count
@@ -63,11 +68,11 @@ class DQNAgent:
         self.env_config = env_config
         self._prediction_cache = {}
 
-        # input dimension match
-        if motion_predictor is not None and (observation_size != 21 or env_config is None):
-            raise ValueError("Car prediction features require a 21-dimensional "
-                             "representation of the current state and environmental configuration.")
-        self.network_input_size = observation_size + (6 if motion_predictor is not None else 0)
+        self.network_input_size = observation_size + (
+            2 * len(config.prediction_steps)
+            if motion_predictor is not None else 0
+        )
+
         self.device = resolve_device(config.device)
         torch.set_num_threads(config.torch_threads)
         torch.manual_seed(config.seed)
@@ -90,54 +95,47 @@ class DQNAgent:
         self.gradient_steps = 0
 
     def predict_car(self, observation) -> np.ndarray | None:
-        """从历史车位预测相对当前时刻 +4/+8/+12 步的位置均值。"""
         if self.motion_predictor is None:
             return None
 
         cfg = self.env_config
-        scale = cfg.grid_size - 1
+        state = observation
+        if not state["has_observation"]:
+            return None
+        steps = self.config.prediction_steps
+        age = state["observation_age"]
+        observed_time = state["time"] - age
 
-        car = tuple(int(round(float(v) * scale)) for v in observation[5:7])
-        goal = tuple(int(round(float(v) * scale)) for v in observation[7:9])
-        velocity = tuple(int(round(float(v))) for v in observation[17:19])
-
-        current_time = int(round(float(observation[9]) * cfg.max_steps))
-        age = int(round(float(observation[20]) * cfg.max_steps))
-        observed_time = current_time - age
-
-        prediction_steps = (age + 4, age + 8, age + 12)
         key = (
-            car,
-            velocity,
-            goal,
+            tuple(state["car_pos"]),
+            tuple(state["car_velocity"]),
             observed_time % cfg.car_move_every,
-            prediction_steps,
+            tuple(age + h for h in steps),
         )
 
         if key not in self._prediction_cache:
             if len(self._prediction_cache) >= 50_000:
                 self._prediction_cache.clear()
 
-            self._prediction_cache[key] = self.motion_predictor.predict_positions(
-                car,
-                velocity,
-                goal,
-                cfg.grid_size,
-                steps=prediction_steps,
-                move_every=cfg.car_move_every,
-                time=observed_time,
+            self._prediction_cache[key] = forecast_vehicle(
+                self.motion_predictor, state, cfg, steps
             )
 
         return self._prediction_cache[key].copy()
 
     def _features(self, observation):
-        observation = np.asarray(observation, dtype=np.float32)
+        features = encode_observation(observation, self.env_config, self.config.observation_features)
+        if self.motion_predictor is None:
+            return features
         predicted = self.predict_car(observation)
         if predicted is None:
-            return observation
-        scale = self.env_config.grid_size - 1
-        relative = predicted / scale - observation[:2]
-        return np.concatenate((observation, relative.reshape(-1))).astype(np.float32)
+            relative = np.zeros((len(self.config.prediction_steps), 2), dtype=np.float32)
+        else:
+            scale = self.env_config.grid_size - 1
+            relative = predicted / scale - np.asarray(
+                [v / scale for v in observation["uav_pos"]], dtype=np.float32
+            )
+        return np.concatenate((features, relative.reshape(-1))).astype(np.float32)
 
     def choose_action(self, observation, epsilon: float = 0.0, mask=None) -> int:
         if not 0.0 <= epsilon <= 1.0:
@@ -193,7 +191,8 @@ class DQNAgent:
     def save(self, path: str | Path, env_config: EnvConfig):
         """保存推理用模型及配置；回放池未保存，不提供断点续训语义。"""
         expected_env = GridWorldEnv(env_config)
-        if self.action_count != expected_env.action_count or self.observation_size != expected_env.observation_size:
+        if self.action_count != expected_env.action_count or self.observation_size != encode_observation(
+                expected_env.reset(seed=0)[0], env_config, self.config.observation_features).size:
             raise ValueError("模型输入或动作数量与保存的环境配置不一致，不能保存。")
         if self.env_config is not None and self.env_config != env_config:
             raise ValueError("预测特征使用的环境配置与保存配置不一致，不能保存。")
@@ -201,7 +200,7 @@ class DQNAgent:
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
-                "format_version": 5,
+                "format_version": 7,
                 "observation_mode": "delayed_vehicle",
                 "network_input_size": self.network_input_size,
                 "motion_predictor": self.motion_predictor.export_state() if self.motion_predictor is not None else None,
@@ -225,19 +224,15 @@ class DQNAgent:
         if not isinstance(checkpoint, dict):
             raise ValueError("模型文件必须包含 checkpoint 字典。")
 
-        if checkpoint.get("format_version") in (1, 2, 3, 4):
-            raise ValueError(
-                "旧版模型与当前 21 维观测不兼容，请重新训练。"
-            )
-        if checkpoint.get("format_version") != 5:
-            raise ValueError("不支持的模型文件版本。")
+        if checkpoint.get("format_version") != 7:
+            raise ValueError("旧版模型与隐藏终点及有效观测标志不兼容，请重新训练。")
         if checkpoint.get("observation_mode") != "delayed_vehicle":
             raise ValueError("模型观测模式与当前车辆观测接口不兼容。")
 
         if (
-            checkpoint.get("action_count") != len(ACTIONS)
-            or checkpoint.get("action_names") != list(ACTION_NAMES)
-            or checkpoint.get("actions") != [list(action) for action in ACTIONS]
+                checkpoint.get("action_count") != len(ACTIONS)
+                or checkpoint.get("action_names") != list(ACTION_NAMES)
+                or checkpoint.get("actions") != [list(action) for action in ACTIONS]
         ):
             raise ValueError("模型的动作数量、顺序或动作定义与当前环境不兼容，请重新训练。")
         try:
@@ -249,8 +244,6 @@ class DQNAgent:
             raise ValueError("模型中的环境配置缺失或无效。") from error
         expected_env = GridWorldEnv(env_config)
 
-        if checkpoint.get("observation_size") != expected_env.observation_size:
-            raise ValueError("模型观测维度与保存的环境配置不一致，请重新训练。")
         try:
             train_values = dict(checkpoint["train_config"])
             # 必须显式保存结构，不能悄悄采用未来版本的新默认值。
@@ -261,6 +254,11 @@ class DQNAgent:
             train_config = TrainConfig(**train_values)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("模型中的网络或训练配置缺失或无效。") from error
+        expected_size = encode_observation(
+            expected_env.reset(seed=0)[0], env_config, train_config.observation_features
+        ).size
+        if checkpoint.get("observation_size") != expected_size:
+            raise ValueError("模型观测维度与保存的特征配置不一致，请重新训练。")
         predictor = None
 
         if checkpoint.get("motion_predictor") is not None:

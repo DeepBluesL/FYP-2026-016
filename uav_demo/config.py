@@ -1,5 +1,7 @@
 """集中管理场景参数和训练参数；修改默认值后重新训练即可。"""
 
+from .observation import DEFAULT_OBSERVATION_FEATURES
+
 from dataclasses import dataclass
 import math
 
@@ -125,6 +127,7 @@ class TrainConfig:
     batch_size: int = 64
     learning_rate: float = 0.0005
     gamma: float = 0.99
+
     replay_capacity: int = 50_000
     learning_starts: int = 1000
     train_every: int = 4
@@ -132,6 +135,7 @@ class TrainConfig:
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
     epsilon_decay_steps: int = 60_000
+
     hidden_sizes: tuple[int, ...] = (128, 128, 128)  # 每个元素定义一个隐藏层的宽度
     activation: str = "leaky_relu"
     leaky_relu_slope: float = 0.01
@@ -142,9 +146,13 @@ class TrainConfig:
     eval_episodes: int = 10
     eval_seed: int = 1_000_000
     log_every: int = 25
+
     use_motion_prediction: bool = True
     prediction_routes: int = 300
     prediction_epochs: int = 20
+
+    observation_features: tuple[str, ...] = DEFAULT_OBSERVATION_FEATURES
+    prediction_steps: tuple[int, ...] = (4, 8, 12)
 
     @property
     def prediction_route_count(self) -> int:
@@ -152,6 +160,16 @@ class TrainConfig:
         return max(2, min(self.prediction_routes, self.episodes))
 
     def __post_init__(self) -> None:
+        self.observation_features = tuple(self.observation_features)
+        if not self.observation_features:
+            raise ValueError("observation_features 不能为空")
+        self.prediction_steps = tuple(self.prediction_steps)
+        if not self.prediction_steps or any(
+                isinstance(h, bool) or not isinstance(h, int) or h < 0
+                for h in self.prediction_steps
+        ):
+            raise ValueError("prediction_steps 必须是非空的非负整数序列")
+
         positive_fields = (
             "episodes", "batch_size", "replay_capacity", "train_every", "target_update_every",
             "epsilon_decay_steps", "torch_threads", "eval_every", "eval_episodes", "log_every",

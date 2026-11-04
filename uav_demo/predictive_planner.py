@@ -9,7 +9,10 @@ from __future__ import annotations
 import numpy as np
 
 from .config import EnvConfig
-from .environment import ACTIONS, preview_move
+from .environment import (
+    ACTIONS, preview_move,
+)
+from .prediction import forecast_vehicle
 from .planner import minimum_travel_steps
 
 
@@ -37,6 +40,7 @@ class PredictivePlanner:
         self.target: tuple[int, int] | None = None
         self.target_time: int | None = None
         self._last_time: int | None = None
+        self.last_predictions = None
 
     def _rendezvous(self, uav, forecast, time):
         """在预测中寻找连续 K 步覆盖点，要求到达早于首次接触至少 3 步。"""
@@ -86,57 +90,90 @@ class PredictivePlanner:
         ))[0]
 
     def choose_action(self, observation, mask) -> int:
-        """只接受 20 维当前观测及合法动作 mask；无环境或真实未来输入。"""
-        observation = np.asarray(observation, dtype=np.float32)
+        self.last_predictions = None
         mask = np.asarray(mask, dtype=bool)
-        if observation.shape != (20,) or not np.isfinite(observation).all():
-            raise ValueError("预测拦截需要有限的 20 维当前状态观测")
+
         if mask.shape != (len(ACTIONS),) or not mask.any():
             raise ValueError("动作 mask 必须含有合法动作")
+
         config = self.config
-        scale = config.grid_size - 1
-        coordinate = lambda values: tuple(int(round(float(value) * scale)) for value in values)
-        uav, car, car_goal = coordinate(observation[:2]), coordinate(observation[5:7]), coordinate(observation[7:9])
-        goal = coordinate(observation[3:5])
-        time = int(round(float(observation[9]) * config.max_steps))
-        if self._last_time is not None and (time == 0 or time < self._last_time):
+        state = observation
+        uav = np.asarray(state["uav_pos"], dtype=np.float64)
+        goal = tuple(state["uav_goal"])
+        time = state["time"]
+
+        if self._last_time is not None and (
+                time == 0 or time < self._last_time
+        ):
             self.reset()
         self._last_time = time
-        speed = int(round(float(observation[2]) * 2))
+
         candidates = []
         for action in np.flatnonzero(mask):
-            position, _, invalid = preview_move(uav, speed, int(action), config.grid_size)
+            position, _, invalid = preview_move(
+                uav, state["uav_speed"], int(action), config.grid_size
+            )
             if not invalid:
                 candidates.append((int(action), position))
+
         if not candidates:
             raise ValueError("mask 没有留下地图内的合法动作")
-        if observation[11] > 0.5 or observation[12] > 0.5:
+
+        if (state["sensing_complete"] or state["sensing_failed"]):
             self.target, self.target_time = goal, None
             return self._toward(candidates, goal)
 
-        velocity = tuple(float(value) for value in observation[17:19])
-        forecast = self.motion_predictor.predict_positions(
-            car, velocity, car_goal, config.grid_size,
-            steps=tuple(range(1, self.horizon + config.sensing_steps)),
-            move_every=config.car_move_every, time=time,
+        if not state["has_observation"]:
+            self.target, self.target_time = None, None
+            return 0  # 首次报告前悬停，不把占位零坐标当作车辆位置。
+
+        # index 0 是当前车位估计；index 1 是当前之后一步。
+        predictions = forecast_vehicle(
+            self.motion_predictor,
+            state,
+            config,
+            steps=range(self.horizon + config.sensing_steps),
         )
+        self.last_predictions = predictions.copy()
+        estimated_car = predictions[0]
+        forecast = predictions[1:]
+
         radius = config.sensing_radius
-        # 已接触或一两格即可接触时，悬停优先；需要移动才用最短位移跟踪。
-        current_distance = np.linalg.norm(np.asarray(uav) - car)
-        if current_distance <= radius or (self.target is None and current_distance <= radius + 2):
-            contacts = [(action, position) for action, position in candidates
-                        if np.linalg.norm(np.asarray(position) - forecast[0]) <= radius]
+        current_distance = np.linalg.norm(uav - estimated_car)
+
+        if current_distance <= radius or (
+                self.target is None and current_distance <= radius + 2
+        ):
+            contacts = [
+                (action, position)
+                for action, position in candidates
+                if np.linalg.norm(
+                    np.asarray(position) - forecast[0]
+                ) <= radius
+            ]
             if contacts:
                 return min(contacts, key=lambda item: (
                     np.linalg.norm(np.asarray(item[1]) - uav),
-                    np.linalg.norm(np.asarray(item[1]) - forecast[0]), item[0],
+                    np.linalg.norm(np.asarray(item[1]) - forecast[0]),
+                    item[0],
                 ))[0]
 
         if self.target is not None:
-            expired = time > self.target_time + config.sensing_steps + self.expiry_slack
-            missed = np.linalg.norm(forecast - np.asarray(self.target), axis=1).min() > radius + 2
+            expired = (
+                    time > self.target_time
+                    + config.sensing_steps + self.expiry_slack
+            )
+            missed = (
+                    np.linalg.norm(
+                        forecast - np.asarray(self.target), axis=1
+                    ).min() > radius + 2
+            )
             if expired or missed:
                 self.target, self.target_time = None, None
+
         if self.target is None:
-            self.target, self.target_time = self._rendezvous(uav, forecast, time)
+            self.target, self.target_time = self._rendezvous(
+                uav, forecast, time
+            )
+
         return self._toward(candidates, self.target)

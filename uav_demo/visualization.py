@@ -96,9 +96,9 @@ def render_episode(
     if show_full_route:
         information_label = "Full vehicle route known  /  No obstacles  /  Eight-direction UAV"
     elif policy in ("dqn", "predictive", "greedy_pursuit"):
-        information_label = "Current vehicle state  /  No future route"
-        if has_predictions:
-            information_label = "Current vehicle state  /  Learned motion forecast  /  No future route"
+        information_label = f"Vehicle reports delayed {config.observation_delay} steps  /  Simulation replay"
+        if "has_observation" in records[0]:
+            information_label += "  /  Car goal hidden from policy"
     else:
         information_label = "Recorded vehicle history  /  No obstacles  /  Eight-direction UAV"
     fig.text(
@@ -206,7 +206,8 @@ def render_episode(
         uav_line.set_data(uav[: index + 1, 0], uav[: index + 1, 1])
         car_line.set_data(car[: index + 1, 0], car[: index + 1, 1])
         if len(predictions[index]):
-            forecast = np.vstack((car[index], predictions[index]))
+            # 预测线不从不可见的真实当前车位出发。
+            forecast = predictions[index]
             forecast_line.set_data(forecast[:, 0], forecast[:, 1])
         else:
             forecast_line.set_data([], [])
@@ -245,7 +246,7 @@ def render_episode(
         status_text.set_text(
             f"Step       {record['time']} / {config.max_steps}\n"
             f"UAV       ({ux}, {uy})\n"
-            f"Car        ({cx}, {cy})\n"
+            f"Car truth ({cx}, {cy})\n"
             f"Grid step  {record['uav_speed']}\n"
             f"Distance  {record['travel_distance']:.1f} cells\n\n"
             f"Sensing   {record['sensing_progress']} / {config.sensing_steps}\n"

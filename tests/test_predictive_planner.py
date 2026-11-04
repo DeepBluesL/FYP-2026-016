@@ -1,6 +1,7 @@
 """当前状态预测拦截的等待、阶段与边界行为。"""
 
 import unittest
+from unittest.mock import Mock
 
 import numpy as np
 
@@ -12,7 +13,7 @@ from uav_demo.predictive_planner import PredictivePlanner
 class StraightPredictor:
     """测试模型仅按已观测速度外推，不持有环境或真实轨迹。"""
 
-    def predict_positions(self, position, velocity, goal, grid_size, steps, move_every=1, time=0):
+    def predict_positions(self, position, velocity, grid_size, steps, move_every=1, time=0):
         moves = (time + np.asarray(steps)) // move_every - time // move_every
         return np.clip(np.asarray(position) + moves[:, None] * np.asarray(velocity), 0, grid_size - 1)
 
@@ -37,6 +38,7 @@ class PredictivePlannerTests(unittest.TestCase):
         env.car_trajectory[:, 1] = 5
         env.car_goal = (14, 5)
         env.car_velocity = (1, 0)
+        env.car_observation_history = [(env.car_pos, env.car_velocity)]
         planner = PredictivePlanner(StraightPredictor(), config)
         pre_contact_hovers, first_contact = 0, None
         while True:
@@ -65,10 +67,12 @@ class PredictivePlannerTests(unittest.TestCase):
                 self.assertEqual(planner.target, (4, 4))
                 planner.reset()
                 self.assertIsNone(planner.target)
+                self.assertIsNone(planner.last_predictions)
                 self.assertIsNone(planner.target_time)
 
     def test_every_chosen_action_obeys_boundary_mask_with_slow_car(self):
-        config = EnvConfig(grid_size=5, max_steps=30, uav_start=(4, 0), uav_goal=(4, 4), car_move_every=2)
+        config = EnvConfig(grid_size=5, max_steps=30, uav_start=(4, 0), uav_goal=(4, 4),
+                           car_move_every=2, observation_delay=3)
         env = GridWorldEnv(config)
         observation, _ = env.reset(seed=2)
         planner = PredictivePlanner(StraightPredictor(), config)
@@ -80,6 +84,24 @@ class PredictivePlannerTests(unittest.TestCase):
             self.assertFalse(info['invalid_move'])
             if terminated or truncated:
                 break
+
+    def test_waits_without_predicting_until_report_arrives(self):
+        env = GridWorldEnv(EnvConfig(observation_delay=3))
+        observation, _ = env.reset(seed=42)
+        predictor = Mock(wraps=StraightPredictor())
+        planner = PredictivePlanner(predictor, env.config)
+        for _ in range(3):
+            self.assertEqual(planner.choose_action(observation, env.valid_action_mask()), 0)
+            predictor.predict_positions.assert_not_called()
+            self.assertIsNone(planner.target)
+            self.assertIsNone(planner.last_predictions)
+            observation, *_ = env.step(0)
+        planner.choose_action(observation, env.valid_action_mask())
+        self.assertEqual(planner.last_predictions.shape,
+                         (planner.horizon + env.config.sensing_steps, 2))
+        predictor.predict_positions.assert_called_once()
+        self.assertEqual(predictor.predict_positions.call_args.kwargs["time"], 0)
+        self.assertEqual(predictor.predict_positions.call_args.kwargs["steps"][0], 3)
 
 
 if __name__ == '__main__':

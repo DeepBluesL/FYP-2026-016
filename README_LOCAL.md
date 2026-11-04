@@ -1,5 +1,33 @@
 UAV Path Planning for Dynamic Target Tracking and Sensing under Different Observability Conditions
 
+## 延迟报告、隐藏车辆终点（2026-11-04）
+
+当前策略输入为 20 维：隐藏车辆终点，在原 19 维观测末尾加入 `has_observation`（索引 19）。`observation_age` 仍在索引 18。`decode_observation()` 提供命名字段，网络继续使用数组。
+
+- 当 `time < observation_delay`，车辆位置、相对位置、方向及年龄用零占位，`has_observation=False`。解码后的 `car_pos` 和 `car_velocity` 为 `None`，不会将占位值解释成真实坐标。
+- 当 `time == observation_delay`，首次交付 `t=0` 的位置报告，方向为初始未知的 `(0, 0)`；之后每步交付延迟报告。延迟为 0 时，reset 即有有效观测。
+- 贪心和预测规划器在首报前悬停。DQN 可自主选择动作，但只收到无观测标志及零预测特征，不调用车辆预测器。
+- 车辆预测器输入为 4 维（历史位置和最近观测位移），不接收真实终点；`forecast_vehicle()` 统一把相对当前时刻的时距转换成 `age + h`。
+- `--prediction-steps 0 1 4` 指定 DQN 使用的预测时刻，网络维度自动变为 `20 + 2 × 3`。规划器仍使用连续预测点判断持续采集。
+
+车辆起终点仍固定，模型可能从训练中学到先验；本次改变的是观测接口。采集反馈继续即时提供。`info` 和回放 JSON 中的车辆真值仅供评估和绘图，普通控制器不读取它们。绘图展示的是仿真回放，不代表 UAV 能看见真值。
+
+模型文件版本为 **7**，旧模型需要重新训练；改预测时距后也需重新训练对应 Q 网络。车辆预测器仍是四方向分类器，目前没有单独的停车类别。
+
+在包含 PyTorch 的 `uav` 环境中运行：
+
+```powershell
+conda activate uav
+python -m unittest discover -s tests
+python train.py --episodes 1500 --observation-delay 4 --prediction-steps 0 1 4 --output-dir outputs/hidden_goal_delay4_train
+python evaluate.py --policy dqn --checkpoint outputs/hidden_goal_delay4_train/best_model.pt --episodes 100 --output-dir outputs/hidden_goal_delay4_dqn_test
+python evaluate.py --policy predictive --checkpoint outputs/hidden_goal_delay4_train/best_model.pt --episodes 100 --output-dir outputs/hidden_goal_delay4_predictive_test
+python compare_pursuit.py --checkpoint outputs/hidden_goal_delay4_train/best_model.pt --training-context fixed_corner --output-dir outputs/hidden_goal_delay4_comparison
+python -m uav_demo.simple_pursuit --observation-delay 4 --output-dir outputs/hidden_goal_delay4_greedy
+```
+
+下方旧实验结果和旧 checkpoint 命令保留作历史记录，当前运行请使用本节命令并显式指定新模型。
+
 ## 固定右下角起点：DQN 与贪心对比
 
 车辆当前从 `(grid_size - 1, 0)` 出发，50×50 时为 `(49, 0)`。`uav_demo/vehicle.py` 中原随机起点代码已注释保留；车辆后续路线仍随机。旧 checkpoint 的 `car_spawn_region` 字段仅用于兼容，不再决定当前起点。由于起点抽样不再消耗随机数，相同种子生成的路线也会与旧版本不同。
@@ -375,3 +403,68 @@ How can a UAV efficiently intercept and track a moving target to complete sensin
 ---
 
 **建议的最低可交付版本（MVP）：** 先完成统一 GridWorld + 车辆随机运动 + 双采集机制 + Oracle + Fully Observable PPO + 固定延迟 Partial Observable PPO。运行并比较六组核心任务后，再加入 Recurrent PPO、Limited FOV、Active Perception 和 MPC 等扩展。
+
+
+### dict 观测与可选网络特征
+
+`reset()` / `step()` 返回原始单位的 dict。车辆首次报告到达前，
+`has_observation=False`，`car_pos` 与 `car_velocity` 为 `None`。
+车辆终点不在 observation 中；info 和演示文件中的真值仅用于评估、回放。
+
+`uav_demo/observation.py` 中的 `observation_features()` 定义归一化特征，
+`encode_observation()` 按 `TrainConfig.observation_features` 的顺序拼接向量。
+新增特征时，在前者定义计算方式，再在配置中加入名称；输入维数由编码结果计算。
+选择已有特征可以通过命令行，例如：
+
+```powershell
+python train.py --episodes 4 --observation-delay 3 --observation-features uav_pos uav_goal car_pos time has_observation --output-dir outputs/selected_features
+```
+
+该列表只选择 DQN 的基础输入，预测器仍使用完整的可见报告；关闭预测附加输入使用
+`--no-motion-prediction`。修改输入字段或顺序后，应训练对应模型。
+checkpoint 保存字段顺序；未保存此字段的旧 v7 模型使用原始 20 维默认顺序。
+
+2026-11-04 的流程检查结果位于 `outputs/dict_smoke_20261104`：
+15×15 地图、报告延迟 3 步、4 回合训练、59 次梯度更新；移除方向和移动相位后，
+基础输入 17 维，附加预测后 23 维。DQN 与预测规划器各评估 3 回合，均未成功，
+这里只验证程序流程。`verification.json` 记录了报告时序与 demo 预测回放核对结果。
+
+
+### 1,500 回合训练结果（2026-11-04）
+
+结果目录：`outputs/dict_train_1500_20261104`（按仓库约定不上传模型和轨迹产物）。
+使用完整默认 20 维观测与 +4/+8/+12 预测点，共 26 维网络输入。
+以下命令从项目根目录运行，可复现训练配置：
+
+```python
+from train import train
+from uav_demo.config import EnvConfig, TrainConfig
+train(
+    EnvConfig(grid_size=15, max_steps=60, uav_goal=(14, 14), observation_delay=3),
+    TrainConfig(episodes=1500, prediction_routes=300, prediction_epochs=20,
+                hidden_sizes=(64, 64), eval_every=100, eval_episodes=30,
+                log_every=100, epsilon_decay_steps=50000),
+    "outputs/dict_train_1500_20261104",
+)
+```
+
+验证集选择第 1,200 回合模型；测试种子为 3000000–3000099，未用于训练或选择模型。
+
+| 指标（100 回合） | DQN | 预测规划器 |
+|---|---:|---:|
+| 任务成功率 | 95% | 59% |
+| 平均奖励 | 148.64 | 54.78 |
+| 平均飞行距离（全部回合） | 47.06 | 33.15 |
+| 成功回合平均步数 | 27.27 | 29.00 |
+
+最终第 1,500 回合的验证成功率为 43.3%，说明训练仍有波动。
+当前结果来自一次训练种子，且相较 4 回合流程检查还改变了特征与网络宽度，
+不能将差异仅归因于训练回合数。规划器距离较短也不能脱离其失败率解释。
+两个 demo 都固定使用 seed=3000000：DQN 成功，预测规划器失败。
+
+```powershell
+python evaluate.py --checkpoint outputs/dict_train_1500_20261104/best_model.pt --episodes 100 --policy dqn --output-dir outputs/dict_train_1500_20261104/evaluate_dqn
+python evaluate.py --checkpoint outputs/dict_train_1500_20261104/best_model.pt --episodes 100 --policy predictive --output-dir outputs/dict_train_1500_20261104/evaluate_predictive
+python demo.py --checkpoint outputs/dict_train_1500_20261104/best_model.pt --policy dqn --output-dir outputs/dict_train_1500_20261104/demo_dqn
+python demo.py --checkpoint outputs/dict_train_1500_20261104/best_model.pt --policy predictive --output-dir outputs/dict_train_1500_20261104/demo_predictive
+```

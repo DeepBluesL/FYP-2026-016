@@ -11,6 +11,7 @@ import numpy as np
 from uav_demo.agent import DQNAgent
 from uav_demo.config import ACTIVATION_NAMES, EnvConfig, TrainConfig
 from uav_demo.environment import GridWorldEnv
+from uav_demo.observation import encode_observation
 from uav_demo.prediction import MotionPredictor
 
 
@@ -75,7 +76,9 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
         )
         print(f"Motion model: direction accuracy={prediction_metrics['holdout_accuracy']:.1%}, "
               f"straight baseline={prediction_metrics['straight_baseline_accuracy']:.1%}", flush=True)
-    agent = DQNAgent(env.observation_size, env.action_count, config,
+    sample, _ = env.reset(seed=config.seed)
+    observation_size = encode_observation(sample, env_config, config.observation_features).size
+    agent = DQNAgent(observation_size, env.action_count, config,
                      motion_predictor=predictor, env_config=env_config)
     best_score = (-1.0, -1.0, -float("inf"), -float("inf"))
     training_columns = [
@@ -195,6 +198,16 @@ def main():
     parser.add_argument("--prediction-routes", type=int, default=defaults.prediction_routes)
     parser.add_argument("--prediction-epochs", type=int, default=defaults.prediction_epochs)
     parser.add_argument("--epsilon-decay-steps", type=int, default=defaults.epsilon_decay_steps)
+    parser.add_argument(
+        "--prediction-steps",
+        type=int,
+        nargs="+",
+        default=defaults.prediction_steps,
+        help="相对当前时刻的预测步数，例如 0 1 4",
+    )
+    parser.add_argument("--observation-features", nargs="+",
+                        default=defaults.observation_features,
+                        help="按顺序选择 DQN 的命名观测特征")
     args = parser.parse_args()
     config = TrainConfig(
         episodes=args.episodes, seed=args.seed, device=args.device,
@@ -205,6 +218,8 @@ def main():
         use_motion_prediction=not args.no_motion_prediction,
         prediction_routes=args.prediction_routes, prediction_epochs=args.prediction_epochs,
         epsilon_decay_steps=args.epsilon_decay_steps,
+        prediction_steps=tuple(args.prediction_steps),
+        observation_features=tuple(args.observation_features),
     )
     env_config = EnvConfig(
         sensing_mode=args.sensing_mode,

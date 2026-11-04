@@ -1,4 +1,4 @@
-"""在相同固定起点车辆路线下，对比已有 DQN 与追当前位置的贪心策略。"""
+"""在相同车辆路线和延迟观测下，对比 DQN 与追最近报告车位的贪心策略。"""
 
 import argparse
 import csv
@@ -23,7 +23,7 @@ def run_episode(agent, config, seed, policy):
     total_reward = 0.0
     sensing_step = None
     while True:
-        action = (choose_action(env) if policy == "greedy_pursuit" else
+        action = (choose_action(observation, config, env.valid_action_mask()) if policy == "greedy_pursuit" else
                   agent.choose_action(observation, epsilon=0.0, mask=env.valid_action_mask()))
         observation, reward, terminated, truncated, info = env.step(action)
         total_reward += reward
@@ -92,7 +92,10 @@ def main():
         "checkpoint": str(args.checkpoint.resolve()),
         "training_context": args.training_context,
         "retrained": args.training_context == "fixed_corner",
-        "note": "Fixed-corner evaluation. Training context is explicitly supplied by the caller. DQN retains its learned motion predictor; greedy uses only current position.",
+        "note": "Both policies receive the same delayed reports without the car goal. Greedy hovers until the first report, then pursues the last reported position.",
+        "observation_delay": config.observation_delay,
+        "prediction_steps": list(agent.config.prediction_steps),
+        "known_car_goal": False,
         "config": asdict(config), "actual_car_start": [config.grid_size - 1, 0],
         "episodes_per_policy": args.episodes, "seed_start": args.seed,
         "seed_end_inclusive": args.seed + args.episodes - 1, "metrics": metrics,
