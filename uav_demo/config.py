@@ -168,12 +168,6 @@ class TrainConfig:
     # 被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价（参考残差 Q 学习）。
     # 需在 observation_features 中加入 rule_action。
     rule_prior: float = 0.0
-    # rule_action：规则动作 0、其余 −rule_prior；rule_distance：每个动作扣 rule_prior × 比规则动作多出的距离（格），
-    # 方向接近规则的动作扣得少。所选特征需在 observation_features 中。
-    rule_prior_feature: str = "rule_action"
-    # uniform：ε 探索时均匀随机选合法动作；softmax：按 softmax(含先验的 Q / 温度) 抽样（参考残差 Q 学习官方代码）。
-    exploration: str = "uniform"
-    exploration_temperature: float = 1.0
 
     @property
     def prediction_route_count(self) -> int:
@@ -219,13 +213,7 @@ class TrainConfig:
             raise ValueError("训练种子必须非负，且训练/验证种子区间不能重叠")
         if not math.isfinite(self.rule_prior) or self.rule_prior < 0:
             raise ValueError("rule_prior 必须是非负有限数")
-        if self.rule_prior_feature not in ("rule_action", "rule_distance"):
-            raise ValueError("rule_prior_feature 只能取 rule_action 或 rule_distance")
-        if self.rule_prior > 0 and self.rule_prior_feature not in self.observation_features:
-            raise ValueError(f"rule_prior > 0 时 observation_features 必须包含 {self.rule_prior_feature}")
-        if self.exploration not in ("uniform", "softmax"):
-            raise ValueError("exploration 只能取 uniform 或 softmax")
-        if not math.isfinite(self.exploration_temperature) or self.exploration_temperature <= 0:
-            raise ValueError("exploration_temperature 必须为有限正数")
+        if self.rule_prior > 0 and "rule_action" not in self.observation_features:
+            raise ValueError("rule_prior > 0 时 observation_features 必须包含 rule_action")
         if self.device not in ("cpu", "cuda", "auto"):
             raise ValueError("device 只能取 cpu、cuda 或 auto")

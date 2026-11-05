@@ -1,6 +1,9 @@
-"""spec 分支的可选开关：势函数奖励、距离版规则先验、softmax 探索；默认关闭时行为不变。"""
+"""spec 分支的可选开关：势函数奖励（reward_v2）；默认关闭时行为不变。"""
 
 import unittest
+
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -8,10 +11,8 @@ import torch
 from uav_demo.agent import DQNAgent
 from uav_demo.config import EnvConfig, TrainConfig
 from uav_demo.environment import GridWorldEnv
-from uav_demo.extrapolate_pursuit import ExtrapolatePursuit
-from uav_demo.observation import DEFAULT_OBSERVATION_FEATURES, encode_observation, feature_slice
+from uav_demo.observation import DEFAULT_OBSERVATION_FEATURES, encode_observation
 
-DISTANCE_FEATURES = DEFAULT_OBSERVATION_FEATURES + ("rule_distance",)
 RULE_FEATURES = DEFAULT_OBSERVATION_FEATURES + ("rule_action",)
 
 
@@ -56,56 +57,37 @@ class PotentialRewardTests(unittest.TestCase):
         self.assertAlmostEqual(total, expected, places=6)
 
 
-class DistancePriorTests(unittest.TestCase):
-    def setUp(self):
-        self.config = EnvConfig(observation_delay=2)
-        env = GridWorldEnv(self.config)
-        self.observation, _ = env.reset(seed=7)
-        for _ in range(4):
-            self.observation, *_ = env.step(0)
+class RemovedOptionTests(unittest.TestCase):
+    """距离版先验和 softmax 探索已移除：取默认值时训练的旧模型仍能加载，否则拒绝。"""
 
-    def test_rule_action_has_zero_gap(self):
-        features = encode_observation(self.observation, self.config, DISTANCE_FEATURES)
-        gaps = features[feature_slice(DISTANCE_FEATURES, "rule_distance")]
-        rule = ExtrapolatePursuit(self.config).choose_action(self.observation, np.ones(17, dtype=bool))
-        self.assertEqual(gaps[rule], 0.0)
-        self.assertTrue(np.all(gaps >= 0))
-        self.assertGreater(gaps.max(), 0)
-
-    def test_decision_q_subtracts_scaled_gap(self):
-        train = TrainConfig(use_motion_prediction=False, observation_features=DISTANCE_FEATURES,
-                            rule_prior=0.5, rule_prior_feature="rule_distance", hidden_sizes=(8,))
-        agent = DQNAgent(encode_observation(self.observation, self.config, DISTANCE_FEATURES).size,
-                         17, train, env_config=self.config)
-        features = torch.as_tensor(agent._features(self.observation))[None]
-        gaps = features[0, feature_slice(DISTANCE_FEATURES, "rule_distance")]
-        expected = agent.online(features)[0] - 0.5 * gaps
-        torch.testing.assert_close(agent._q(agent.online, features)[0], expected)
-
-    def test_prior_feature_must_be_in_observation(self):
-        with self.assertRaises(ValueError):
-            TrainConfig(observation_features=RULE_FEATURES, rule_prior=1.0, rule_prior_feature="rule_distance")
-
-
-class SoftmaxExplorationTests(unittest.TestCase):
-    def test_softmax_exploration_follows_strong_prior_uniform_does_not(self):
+    def save_with(self, **extra):
         config = EnvConfig(observation_delay=2)
-        env = GridWorldEnv(config)
-        observation, _ = env.reset(seed=7)
-        for _ in range(4):
-            observation, *_ = env.step(0)
-        rule = ExtrapolatePursuit(config).choose_action(observation, env.valid_action_mask())
-        hits = {}
-        for exploration in ("uniform", "softmax"):
-            train = TrainConfig(use_motion_prediction=False, observation_features=RULE_FEATURES,
-                                rule_prior=50.0, exploration=exploration, hidden_sizes=(8,))
-            agent = DQNAgent(encode_observation(observation, config, RULE_FEATURES).size,
-                             17, train, env_config=config)
-            picks = [agent.choose_action(observation, epsilon=1.0, mask=env.valid_action_mask())
-                     for _ in range(200)]
-            hits[exploration] = np.mean(np.asarray(picks) == rule)
-        self.assertGreater(hits["softmax"], 0.95)
-        self.assertLess(hits["uniform"], 0.3)
+        train = TrainConfig(use_motion_prediction=False, observation_features=RULE_FEATURES,
+                            rule_prior=2.0, hidden_sizes=(8,))
+        size = encode_observation(GridWorldEnv(config).reset(seed=0)[0], config, RULE_FEATURES).size
+        path = Path(self.directory.name) / "model.pt"
+        DQNAgent(size, 17, train, env_config=config).save(path, config)
+        checkpoint = torch.load(path, weights_only=True)
+        checkpoint["train_config"].update(extra)
+        torch.save(checkpoint, path)
+        return path
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_defaults_load(self):
+        path = self.save_with(rule_prior_feature="rule_action", exploration="uniform",
+                              exploration_temperature=1.0)
+        agent, _ = DQNAgent.load(path)
+        self.assertEqual(agent.config.rule_prior, 2.0)
+
+    def test_removed_values_rejected(self):
+        for extra in ({"rule_prior_feature": "rule_distance"}, {"exploration": "softmax"}):
+            with self.assertRaises(ValueError):
+                DQNAgent.load(self.save_with(**extra))
 
 
 if __name__ == "__main__":

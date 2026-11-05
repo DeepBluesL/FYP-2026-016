@@ -69,7 +69,7 @@ class DQNAgent:
         self._prediction_cache = {}
         # rule_prior > 0：选动作和下一步目标中加入外推规则先验（规则动作 0、其余 −rule_prior），
         # 被拟合的 Q 不含先验，偏离规则的代价在训练中持续存在（参考残差 Q 学习）。
-        self._rule_slice = (feature_slice(config.observation_features, config.rule_prior_feature)
+        self._rule_slice = (feature_slice(config.observation_features, "rule_action")
                             if config.rule_prior > 0 else None)
 
         self.network_input_size = observation_size + (
@@ -150,18 +150,12 @@ class DQNAgent:
         if mask.shape != (self.action_count,) or not mask.any():
             raise ValueError("动作 mask 尺寸不正确，或没有可选动作。")
         # epsilon=0 的评估不消耗训练使用的随机数。
-        explore = epsilon > 0.0 and self.rng.random() < epsilon
-        if explore and self.config.exploration == "uniform":
+        if epsilon > 0.0 and self.rng.random() < epsilon:
             return int(self.rng.choice(np.flatnonzero(mask)))
         with torch.no_grad():
             inputs = torch.as_tensor(self._features(observation), dtype=torch.float32, device=self.device)
             q_values = self._q(self.online, inputs).cpu().numpy()
-        q_values = np.where(mask, q_values, -np.inf)
-        if explore:  # softmax 探索：偏向含先验 Q 高的动作，而不是均匀乱飞
-            logits = (q_values - q_values.max()) / self.config.exploration_temperature
-            probabilities = np.exp(logits)
-            return int(self.rng.choice(self.action_count, p=probabilities / probabilities.sum()))
-        return int(np.argmax(q_values))
+        return int(np.argmax(np.where(mask, q_values, -np.inf)))
 
     def remember(self, observation, action, reward, next_observation, done, next_mask):
         self.replay.add(self._features(observation), action, reward,
@@ -204,12 +198,9 @@ class DQNAgent:
         """用于选动作和下一步目标的 Q 值；启用 rule_prior 时加上规则先验（规则 one-hot 位于特征向量中）。"""
         q = network(features)
         if self._rule_slice is not None:
-            rule = features[..., self._rule_slice]
-            # log 概率形式：规则动作 0，其余扣分；用扣分而非加分，避免按步累积正奖励。
-            if self.config.rule_prior_feature == "rule_action":
-                q = q + self.config.rule_prior * (rule - 1)
-            else:
-                q = q - self.config.rule_prior * rule
+            onehot = features[..., self._rule_slice]
+            # log 概率形式：规则动作 0，其余 −rule_prior；用扣分而非加分，避免按步累积正奖励。
+            q = q + self.config.rule_prior * (onehot - 1)
         return q
 
     def save(self, path: str | Path, env_config: EnvConfig):
@@ -281,6 +272,12 @@ class DQNAgent:
             mode = train_values.pop("rule_prior_mode", "persistent")
             if mode != "persistent" and train_values.get("rule_prior", 0.0) > 0:
                 raise ValueError("该模型使用已移除的 init 先验模式，请重新训练")
+            # spec 分支曾试过距离版先验和 softmax 探索，已移除；只接受取默认值时保存的模型。
+            removed = {"rule_prior_feature": "rule_action", "exploration": "uniform"}
+            for field, default in removed.items():
+                if train_values.pop(field, default) != default:
+                    raise ValueError(f"该模型使用已移除的选项 {field}，请重新训练")
+            train_values.pop("exploration_temperature", None)
             train_config = TrainConfig(**train_values)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("模型中的网络或训练配置缺失或无效。") from error
