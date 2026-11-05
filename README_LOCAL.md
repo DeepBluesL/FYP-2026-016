@@ -64,7 +64,7 @@ python -m uav_demo.simple_pursuit --observation-delay 4 --output-dir outputs/hid
 
 ## 固定右下角起点：DQN 与贪心对比
 
-车辆当前从 `(grid_size - 1, 0)` 出发，50×50 时为 `(49, 0)`。`uav_demo/vehicle.py` 中原随机起点代码已注释保留；车辆后续路线仍随机。旧 checkpoint 的 `car_spawn_region` 字段仅用于兼容，不再决定当前起点。由于起点抽样不再消耗随机数，相同种子生成的路线也会与旧版本不同。
+车辆当前从 `(grid_size - 1, 0)` 出发，50×50 时为 `(49, 0)`。原随机起点的注释代码已删除（随机路线见 `--car-route random`）；车辆后续路线仍随机。旧 checkpoint 中的 `car_spawn_region` 字段加载时忽略。由于起点抽样不再消耗随机数，相同种子生成的路线也会与旧版本不同。
 
 在仓库根目录、包含 PyTorch 的 `uav` 环境中运行：
 
@@ -139,13 +139,13 @@ outputs/               # 模型、日志与图像，已被 Git 忽略
 | 地图 | 50 × 50，无障碍；坐标 0–49，x 向右、y 向上 |
 | UAV 起点 / 终点 | `(0, 0)` / `(49, 49)` |
 | UAV 移动 | 八方向，每步选择网格步长 1 或 2；另有悬停 |
-| Car 起点 | 固定右下角 `(49, 0)`（一般为 `(grid_size - 1, 0)`）；原随机起点代码已注释，`car_spawn_region` 仅保留兼容旧模型 |
+| Car 起点 | 固定右下角 `(49, 0)`（一般为 `(grid_size - 1, 0)`）；`--car-route random` 可改为每局随机起点和目的地；`car_spawn_region` 已删除，旧模型加载时忽略 |
 | Car 终点 | 左上角 `(0, 49)`；按地图尺寸取 `(0, grid_size - 1)` |
 | Car 速度 | `car_move_every=1`，每个环境步移动 1 格；到站后停留 |
 | Car 方向惯性 | 基础权重：直行 0.65、左/右转各 0.15、掉头 0.05 |
 | Car 终点偏置 | 权重再乘 `exp(car_goal_bias × 靠近终点格数)`，默认 bias=1.0 |
 | 感知 | 欧氏距离 ≤ 2 格，连续 5 个环境步；可选累计模式 |
-| 总步数 | `max_steps=300`，含感知与前往 UAV 终点两个阶段 |
+| 总步数 | `max_steps=150`，含感知与前往 UAV 终点两个阶段 |
 | 完整任务成功 | 感知完成，并且 UAV 抵达自己的终点 |
 
 车辆在 `reset(seed=...)` 时预生成模拟路线，与 UAV 动作无关；相同配置和 seed 可复现。该路线是环境内部真实状态，**不会拼接进 DQN 的观测或预测器推理输入**。方向概率经过目标偏置、边界和剩余时间约束后重新归一化，实际直行概率并不恒为 0.65。临近时限时只保留还能按时到站的移动。
@@ -160,7 +160,7 @@ Car 速度在 `EnvConfig.car_move_every` 调整：1 为每步一格，2 为两�
 
 保留“失败后继续飞往 UAV 终点”的规则，但失败后距离塑形只保留原来的 `failed_return_progress_scale=0.1`。失败后不再获得接触/采集完成奖励，也不获得 +100 任务成功奖励。`sensing_finished = sensing_complete or sensing_failed` 表示阶段结束，不等于感知成功。
 
-采集阶段结束后抵达 UAV 终点，回合 `terminated=True`；完整任务成功仍须 `sensing_complete=True`。提前飞到 UAV 终点而感知阶段尚未结束，不算成功也不会提前结束；如果此后车辆到站，则按失败处理。300 步仍是整回合上限，不因失败重新计时。
+采集阶段结束后抵达 UAV 终点，回合 `terminated=True`；完整任务成功仍须 `sensing_complete=True`。提前飞到 UAV 终点而感知阶段尚未结束，不算成功也不会提前结束；如果此后车辆到站，则按失败处理。150 步仍是整回合上限，不因失败重新计时。
 
 这是任务阶段、奖励和成功判定的约束；环境不会替换 DQN 的动作，也没有把“必须朝车飞”硬编码成动作规则。随机探索或尚未学好的策略仍可能不去感知，需通过独立验证检查。Oracle 与 DQN 的决策路径独立，DQN 不会偷偷调用 Oracle 帮它飞行。
 
@@ -210,7 +210,7 @@ python train.py --sensing-mode cumulative --output-dir outputs/current_predictio
 
 | 配置项 | 当前值 | 作用 |
 |---|---|---|
-| `step_penalty` | -0.1 | 每步时间代价；300 步未折扣累计 -30 |
+| `step_penalty` | -0.1 | 每步时间代价；150 步未折扣累计 -15 |
 | `movement_penalty` | -0.1 | 每格实际飞行距离的代价；斜向距离含 √2，悬停为零 |
 | `progress_to_contact_boundary` | `True` | 感知阶段使用到有效范围边界的距离，不要求贴近车中心 |
 | `progress_reward` | 0.2 | 当前任务目标的前后距离差系数 |
