@@ -60,6 +60,11 @@ class EnvConfig:
     invalid_move_penalty: float = -1.0
     timeout_penalty: float = -10.0
     auto_return: bool = False  # 采集结束后只允许沿最短路径飞向终点的动作；返程不再交给策略学习
+    # True：进度与接触奖励改为势函数塑形 γΦ(s')−Φ(s)（Φ = −进度权重·距离 + 接触奖励·采集进度，
+    # 终止时 Φ=0，不改变最优策略，也不能靠反复进出刷分）；不再计非法移动扣分（动作掩码已屏蔽）；
+    # 随机路线超时仍未采完按采集失败扣分，而不是只扣超时分。
+    reward_v2: bool = False
+    shaping_gamma: float = 0.99  # reward_v2 势函数塑形的折扣，应与 DQN 的 gamma 一致
 
     def __post_init__(self) -> None:
         if not isinstance(self.grid_size, int) or self.grid_size < 5:
@@ -122,6 +127,9 @@ class EnvConfig:
 
         if not math.isfinite(self.movement_penalty) or self.movement_penalty > 0:
             raise ValueError("movement_penalty 必须是有限非正数")
+
+        if not 0 < self.shaping_gamma <= 1:
+            raise ValueError("shaping_gamma 必须在 (0, 1] 内")
 
 
 @dataclass

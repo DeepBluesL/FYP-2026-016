@@ -198,6 +198,10 @@ def main():
     parser.add_argument("--auto-return", action="store_true", help="采集结束后自动沿最短路径返回终点")
     parser.add_argument("--car-route", choices=("fixed", "random"), default=EnvConfig().car_route,
                         help="fixed：固定起终点；random：每局随机起点和目的地，到达后换新目的地")
+    parser.add_argument("--movement-penalty", type=float, default=EnvConfig().movement_penalty,
+                        help="每格飞行距离的代价（非正数）；设为 0 时奖励只看时间，与完成步数指标一致")
+    parser.add_argument("--reward-v2", action="store_true",
+                        help="进度与接触奖励改为势函数塑形、去掉非法移动扣分、随机路线超时未采完按失败扣分")
     parser.add_argument("--observation-features", nargs="+",
                         default=defaults.observation_features,
                         help="按顺序选择 DQN 的命名观测特征")
@@ -220,6 +224,9 @@ def main():
         observation_delay=args.observation_delay,
         auto_return=args.auto_return,
         car_route=args.car_route,
+        movement_penalty=args.movement_penalty,
+        reward_v2=args.reward_v2,
+        shaping_gamma=config.gamma,
     )
     train(env_config, config, args.output_dir)
 
