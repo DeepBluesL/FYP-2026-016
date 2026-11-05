@@ -1,5 +1,39 @@
 UAV Path Planning for Dynamic Target Tracking and Sensing under Different Observability Conditions
 
+## 外推规则 + DQN（2026-11-05）
+
+在延迟报告下比较“外推贪心”与“以外推规则为基础的 DQN”。新增内容均为开关，默认关闭，不改变原有行为。
+
+| 开关 / 文件 | 作用 |
+| --- | --- |
+| `uav_demo/extrapolate_pursuit.py` | 外推贪心：按最近报告位移外推到下一步（考虑 `car_move_every` 节拍），首报前悬停 |
+| `--auto-return` | 采集结束后只保留最短路径返程动作，返程不交给策略学习 |
+| `--car-route random` | 每局随机车辆起点（离 UAV 起点 8–15 格）和目的地（至少 20 格外），到达后换新目的地；车辆终点不可见，也无法从训练中记住路线 |
+| 特征 `rule_action` | 外推贪心本步所选动作的 17 维 one-hot |
+| `--rule-prior b` | 规则先验：Q 值上规则动作 0、其余动作 −b（log 概率形式）；被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价（参考 Li et al., NeurIPS 2023 残差 Q 学习的形式） |
+| `compare_delay.py` | 外推贪心与 DQN（多种子）逐路线配对比较：完成时间（失败记 150 步）、bootstrap 95% CI、Wilcoxon |
+
+训练与比较命令（不使用学习预测器）：
+
+```powershell
+$F = "uav_pos uav_speed uav_goal car_pos time sensing_progress sensing_complete sensing_failed relative_car relative_uav_goal car_velocity car_move_phase observation_age has_observation".Split(" ")
+python train.py --episodes 1500 --seed 0 --observation-delay 6 --auto-return --car-route random --no-motion-prediction --observation-features @F rule_action --rule-prior 2 --output-dir outputs/rnd_keep2_d6_seed0
+python compare_delay.py --checkpoints outputs/rnd_keep2_d6_seed0/best_model.pt outputs/rnd_keep2_d6_seed1/best_model.pt outputs/rnd_keep2_d6_seed2/best_model.pt --output outputs/dqn_compare/rnd_keep2_d6.json
+```
+
+随机车辆路线、自动返程，测试种子 3000000–3000199（200 条路线），每组 3 个训练种子，1500 回合。
+“DQN 更快”= 外推贪心完成时间 − DQN 完成时间（逐路线取三个种子平均）：
+
+| d | 外推贪心 成功率 / 完成时间 | 纯 DQN | **外推规则先验 DQN（b=2）** |
+| --- | --- | --- | --- |
+| 4 | 99.5% / 57.9 | +5.0 [0.4, 9.5]，p=0.003 | **+12.6 [9.6, 15.8]，p=3×10⁻¹⁵**；成功 99.5–100% |
+| 6 | 86% / 81.4 | −13.9 [−21.8, −6.2]，p=7×10⁻⁴ | **+21.5 [17.4, 25.7]，p=3×10⁻²³**；成功 97–100% |
+| 8 | 62.5% / 106.9 | −0.5 [−7.7, 6.9]，p=0.95 | **+35.5 [30.3, 40.9]，p=1×10⁻²⁵**；成功 92–95% |
+
+结论：路线随机时，纯 DQN 不能稳定超过外推贪心（d=6 更差，种子间差异很大）；
+以外推规则为先验的 DQN 在三种延迟下都显著快于外推贪心，三个种子各自也都更快，且延迟越大提升越大。
+固定路线（原设定）下各方法也都超过外推贪心，但纯 DQN 同样大幅领先，提升可能部分来自记住固定路线，因此以随机路线结果为准。
+
 ## 延迟报告、隐藏车辆终点（2026-11-04）
 
 当前策略输入为 20 维：隐藏车辆终点，在原 19 维观测末尾加入 `has_observation`（索引 19）。`observation_age` 仍在索引 18。`decode_observation()` 提供命名字段，网络继续使用数组。

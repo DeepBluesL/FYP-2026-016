@@ -96,7 +96,19 @@ class GridWorldEnv:
         return self._observation(), self._info(invalid_move=False)
 
     def valid_action_mask(self) -> np.ndarray:
-        """仅屏蔽地图外动作；hover 始终合法。"""
+        """仅屏蔽地图外动作；hover 始终合法。auto_return 时采集结束后只保留最短路径返程动作。"""
+        if self.config.auto_return and self.sensing_finished:
+            from .planner import minimum_travel_steps  # 延迟导入：planner 依赖本模块
+            goal = tuple(self.config.uav_goal)
+            options = []
+            for action in range(self.action_count):
+                position, _, invalid = preview_move(self.uav_pos, self.uav_speed, action, self.config.grid_size)
+                if not invalid:
+                    distance = sum(abs(a - b) for a, b in zip(position, goal))
+                    options.append((minimum_travel_steps(position, goal), distance, action))
+            mask = np.zeros(self.action_count, dtype=np.bool_)
+            mask[min(options)[2]] = True
+            return mask
         return np.asarray([
             not preview_move(self.uav_pos, self.uav_speed, action, self.config.grid_size)[2]
             for action in range(self.action_count)
@@ -150,7 +162,9 @@ class GridWorldEnv:
                 self.sensing_complete = True
                 reward += config.sensing_complete_reward
             # 到站这一步仍有最后一次采集机会；刚好完成则不处罚。
-            if not self.sensing_complete and self.car_pos == self.car_goal:
+            # 只有固定路线的车辆会到站停车；随机路线会换新目的地继续行驶，失败只来自超时。
+            if (config.car_route == "fixed" and not self.sensing_complete
+                    and self.car_pos == self.car_goal):
                 self.sensing_failed = True
                 reward += config.sensing_failure_penalty
 

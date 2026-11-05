@@ -19,23 +19,13 @@ def generate_vehicle_trajectory(
     只选择仍然能按时抵达终点的方向。到达后停留，非移动时刻也停留。
     这样每次 reset 都能得到一条完整、可复现且确实到终点的路线。
     """
+    if config.car_route == "random":
+        return _random_route(config, rng)
     size = config.grid_size
 
     # x 向右、y 向上：起点固定右下角，50x50 时为 (49, 0)。
     position = np.asarray((size - 1, 0), dtype=np.int64)
 
-    # 原随机起点逻辑暂时停用，保留以便恢复。
-    # if config.car_spawn_region == "bottom_right":
-    #     position = np.asarray((
-    #         rng.integers(2 * size // 3, size),
-    #         rng.integers(0, (size + 2) // 3),
-    #     ), dtype=np.int64)
-    # elif rng.random() < 0.5:
-    #     low, high = size // 3, min(size, 2 * size // 3 + 1)
-    #     position = rng.integers(low, high, size=2, dtype=np.int64)
-    # else:
-    #     position = rng.integers(0, size, size=2, dtype=np.int64)
-    #     position[int(rng.integers(0, 2))] = rng.integers(2 * size // 3, size)
 
     # 车辆终点固定在左上角；坐标随地图尺寸变化。
     goal = (0, size - 1)
@@ -74,3 +64,42 @@ def generate_vehicle_trajectory(
         trajectory[time] = position
 
     return trajectory, goal
+
+
+def _random_route(config: EnvConfig, rng: np.random.Generator) -> tuple[np.ndarray, tuple[int, int]]:
+    """随机起点和随机目的地；到达目的地后换新目的地继续行驶，不停车。返回首个目的地。"""
+    size = config.grid_size
+    cells = np.indices((size, size)).reshape(2, -1).T
+    uav = np.asarray(config.uav_start)
+    distance = np.linalg.norm(cells - uav, axis=1)
+    starts = cells[(distance >= 8) & (distance <= 15)]
+    position = starts[int(rng.integers(len(starts)))].copy()
+
+    def new_goal(origin):
+        options = cells[np.abs(cells - origin).sum(axis=1) >= 20]
+        return options[int(rng.integers(len(options)))].copy()
+
+    goal = new_goal(position)
+    first_goal = (int(goal[0]), int(goal[1]))
+    heading = int(rng.integers(0, 4))
+    log_turn_weights = np.log(np.asarray(
+        (config.car_straight_prob, config.car_turn_prob,
+         config.car_reverse_prob, config.car_turn_prob), dtype=np.float64
+    ))
+    trajectory = np.empty((config.max_steps + 1, 2), dtype=np.int64)
+    trajectory[0] = position
+    for time in range(1, config.max_steps + 1):
+        if time % config.car_move_every == 0:
+            if np.array_equal(position, goal):
+                goal = new_goal(position)
+            options = position + DIRECTIONS
+            direction_indices = np.flatnonzero(np.all((options >= 0) & (options < size), axis=1))
+            relative_turns = (direction_indices - heading) % 4
+            progress = (np.abs(position - goal).sum()
+                        - np.abs(options[direction_indices] - goal).sum(axis=1))
+            logits = log_turn_weights[relative_turns] + config.car_goal_bias * progress
+            weights = np.exp(logits - np.max(logits))
+            heading = int(rng.choice(direction_indices, p=weights / weights.sum()))
+            position = options[heading].copy()
+        trajectory[time] = position
+    return trajectory, first_goal

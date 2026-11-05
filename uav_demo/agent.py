@@ -12,7 +12,7 @@ from .environment import (
     ACTIONS, ACTION_NAMES, GridWorldEnv,
 
 )
-from .observation import encode_observation
+from .observation import encode_observation, feature_slice
 from .prediction import forecast_vehicle
 from .model import QNetwork
 
@@ -67,6 +67,10 @@ class DQNAgent:
         self.motion_predictor = motion_predictor
         self.env_config = env_config
         self._prediction_cache = {}
+        # rule_prior > 0：选动作和下一步目标中加入外推规则先验（规则动作 0、其余 −rule_prior），
+        # 被拟合的 Q 不含先验，偏离规则的代价在训练中持续存在（参考残差 Q 学习）。
+        self._rule_slice = (feature_slice(config.observation_features, "rule_action")
+                            if config.rule_prior > 0 else None)
 
         self.network_input_size = observation_size + (
             2 * len(config.prediction_steps)
@@ -150,7 +154,7 @@ class DQNAgent:
             return int(self.rng.choice(np.flatnonzero(mask)))
         with torch.no_grad():
             inputs = torch.as_tensor(self._features(observation), dtype=torch.float32, device=self.device)
-            q_values = self.online(inputs).cpu().numpy()
+            q_values = self._q(self.online, inputs).cpu().numpy()
         return int(np.argmax(np.where(mask, q_values, -np.inf)))
 
     def remember(self, observation, action, reward, next_observation, done, next_mask):
@@ -171,10 +175,12 @@ class DQNAgent:
         rewards = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
         dones = torch.as_tensor(dones, dtype=torch.bool, device=self.device)
         next_masks = torch.as_tensor(next_masks, dtype=torch.bool, device=self.device)
-        predicted = self.online(observations).gather(1, actions[:, None]).squeeze(1)
+        # 被拟合的是不含先验的残差 Q；先验只进入动作选择和下一步目标。
+        fitted = self.online(observations)
+        predicted = fitted.gather(1, actions[:, None]).squeeze(1)
         with torch.no_grad():
-            next_actions = self.online(next_observations).masked_fill(~next_masks, -torch.inf).argmax(dim=1)
-            next_q = self.target(next_observations).gather(1, next_actions[:, None]).squeeze(1)
+            next_actions = self._q(self.online, next_observations).masked_fill(~next_masks, -torch.inf).argmax(dim=1)
+            next_q = self._q(self.target, next_observations).gather(1, next_actions[:, None]).squeeze(1)
             # horizon 是任务的一部分，terminated 和 truncated 都不再 bootstrap。
             next_q = torch.where(dones, torch.zeros_like(next_q), next_q)
             expected = rewards + self.config.gamma * next_q
@@ -187,6 +193,15 @@ class DQNAgent:
         if self.gradient_steps % self.config.target_update_every == 0:
             self.target.load_state_dict(self.online.state_dict())
         return float(loss.item())
+
+    def _q(self, network, features):
+        """用于选动作和下一步目标的 Q 值；启用 rule_prior 时加上规则先验（规则 one-hot 位于特征向量中）。"""
+        q = network(features)
+        if self._rule_slice is not None:
+            onehot = features[..., self._rule_slice]
+            # log 概率形式：规则动作 0，其余 −rule_prior；用扣分而非加分，避免按步累积正奖励。
+            q = q + self.config.rule_prior * (onehot - 1)
+        return q
 
     def save(self, path: str | Path, env_config: EnvConfig):
         """保存推理用模型及配置；回放池未保存，不提供断点续训语义。"""
@@ -239,6 +254,7 @@ class DQNAgent:
             env_values = dict(checkpoint["env_config"])
             env_values.setdefault("progress_to_contact_boundary", False)
             env_values.setdefault("movement_penalty", 0.0)
+            env_values.pop("car_spawn_region", None)  # 旧模型保存过该字段，车辆起点已固定，不再使用
             env_config = EnvConfig(**env_values)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("模型中的环境配置缺失或无效。") from error
@@ -251,6 +267,9 @@ class DQNAgent:
                 if field not in train_values:
                     raise ValueError(f"缺少网络配置 {field}")
             train_values["device"] = device
+            # 先验模式已固定为持续先验；只接受当时就用持续先验训练的模型。
+            if train_values.pop("rule_prior_mode", "persistent") != "persistent":
+                raise ValueError("该模型使用已移除的 init 先验模式，请重新训练")
             train_config = TrainConfig(**train_values)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("模型中的网络或训练配置缺失或无效。") from error

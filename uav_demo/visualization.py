@@ -292,7 +292,7 @@ def main() -> None:
     episode_path = args.episode.resolve()
     episode = json.loads(episode_path.read_text(encoding="utf-8"))
     env_values = dict(episode["config"])
-    env_values.setdefault("car_spawn_region", "mixed")  # 兼容旧版回放的配置
+    env_values.pop("car_spawn_region", None)  # 旧版回放保存过该字段，现已不再使用
     paths = render_episode(
         EnvConfig(**env_values),
         np.asarray(episode["car_trajectory"]),
