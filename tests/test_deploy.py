@@ -33,6 +33,19 @@ class DeployTests(unittest.TestCase):
         self.assertEqual(observation["car_velocity"], (1, 0))  # 最近一次非零位移
         self.assertEqual(observation["observation_age"], 6)
 
+    def test_projectairsim_example_grid_backend_matches_reference(self):
+        import asyncio
+        import json
+        from projectairsim_example import ROUTES, GridBackend, run_episode
+        data = json.loads(ROUTES.read_text(encoding="utf-8"))
+        for delay in (4, 8):
+            policy = Policy(delay=delay)
+            reference = data["reference"][str(delay)]["cv_prediction_plus_rl"]
+            for route, ref in list(zip(data["routes"], reference))[:10]:
+                result = asyncio.run(run_episode(policy, GridBackend(), [tuple(p) for p in route["car"]]))
+                with self.subTest(delay=delay, seed=route["seed"]):
+                    self.assertEqual(result, ref)
+
     def test_delay_must_match_model(self):
         with self.assertRaises(ValueError):
             Policy(Path(__file__).resolve().parents[1] / "deploy" / "models" / "d6.pt", delay=4)

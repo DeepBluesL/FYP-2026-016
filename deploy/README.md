@@ -58,6 +58,12 @@ for t in range(150):
 延迟不是 4 / 6 / 8 时，选最接近的模型会有一定偏差；需要准确结果请按新延迟重新训练
 （命令见 `README_LOCAL.md`）。
 
+## 仿真平台接入（Project AirSim 等）
+
+- `SIM_SPEC.md`：仿真场景要对齐的全部设定和容易漏掉的细节。
+- `routes/test_routes.json`：200 条测试路线的车辆轨迹和参考结果，用于回放对比（由 `export_routes.py` 生成）。
+- `projectairsim_example.py`：Project AirSim 接入示例，主循环已写好；先用 `--backend grid` 确认与参考结果一致。
+
 ## 测试路线上的表现（`check.py`，200 条路线）
 
 | 模型 | 成功率 | 平均完成时间（失败记 150 步） |
