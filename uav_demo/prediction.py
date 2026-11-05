@@ -68,10 +68,11 @@ def forecast_vehicle(predictor, state, config, steps):
         or h < 0
         for h in steps
     ):
-        raise ValueError("steps 必须是非空的非负整数序列")
+        raise ValueError("`steps` must be a non-empty sequence of non-negative integers")
 
     if not state["has_observation"]:
         return None
+
     age = state["observation_age"]
 
     return predictor.predict_positions(

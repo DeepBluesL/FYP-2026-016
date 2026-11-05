@@ -1,5 +1,58 @@
-UAV Path Planning for Dynamic Target Tracking and Sensing under Different Observability Conditions  
+# UAV Path Planning for Dynamic Target Tracking and Sensing
 
+## 当前实现与进展（2026-11-05）
+
+本仓库已实现无障碍 GridWorld、Double DQN、车辆运动预测器、贪心追踪、外推追踪、预测拦截规划器与 Oracle 启发式对照。下面的项目规划保留团队分工与后续方向，不代表 PPO、循环网络、有限视野或最优 Oracle 求解已经实现。
+
+### 环境与信息边界
+
+- 默认地图 50×50，UAV 支持悬停及八方向、两档步长，共 17 个动作。支持连续和累计采集；完成采集并到达 UAV 终点才算成功。
+- `reset()` / `step()` 返回原始单位的 dict。车辆终点和未来轨迹不进入普通策略观测；`info` 和回放文件中的真值仅供评估与可视化。
+- 首次报告前，`has_observation=False`，车辆位置和方向为 `None`。延迟为 3 时，t=3 才收到车辆 t=0 的位置。
+- `--car-route fixed` 为默认固定起终点路线；`random` 使用随机起点、目的地，并在到达后更换目的地。隐藏字段不等于消除可学习的路线先验。
+
+### 观测、预测与策略
+
+| 位置 | 作用 |
+|---|---|
+| `uav_demo/environment.py` | 维护真实状态，生成延迟且不泄露终点的观测 |
+| `uav_demo/observation.py` | 归一化、按字段顺序编码；支持可选 `rule_action` 特征 |
+| `uav_demo/config.py`、`train.py` | 通过 `observation_features` / `--observation-features` 选择特征，按编码结果推导网络维数 |
+| `uav_demo/prediction.py` | `forecast_vehicle()` 用 `age + h` 对齐预测时距，以报告时刻对齐车辆移动时钟 |
+| `uav_demo/agent.py` | Double DQN、预测附加特征、经验回放及配置保存加载 |
+| `uav_demo/predictive_planner.py` | 连续预测序列上的会合规划，记录当次实际预测 |
+| `evaluate.py`、`demo.py` | 独立评估、首次报告指标、逐步观测与预测记录、PNG/GIF 回放 |
+| `compare_delay.py` | 不同报告延迟下的策略比较 |
+
+默认基础输入为 20 维，三个预测点增加 6 维。`--prediction-steps 4 8 12` 表示相对当前时刻的预测偏移，而非相对历史报告时刻；没有报告时不调用预测器。经验回放仍保存数值数组，checkpoint 保存特征名称和顺序。
+
+另外支持外推规则先验（`--rule-prior`，需选择 `rule_action` 特征）和采集结束后自动返航（`--auto-return`）。这些设置改变策略行为，比较实验时应显式记录；默认不开启。
+
+### 安装与运行
+
+在项目根目录执行（Python 环境需安装 PyTorch）：
+
+```powershell
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -q
+python train.py --episodes 1500 --observation-delay 3 --output-dir outputs/train_delay3
+python evaluate.py --checkpoint outputs/train_delay3/best_model.pt --policy dqn --episodes 100 --output-dir outputs/test_delay3
+python demo.py --checkpoint outputs/train_delay3/best_model.pt --policy dqn --output-dir outputs/demo_delay3
+```
+
+评估和演示的 `--policy predictive` 可切换为预测拦截规划器，需要模型包含车辆预测器。`--no-motion-prediction` 关闭 DQN 的预测附加输入，`--no-gif` 可用于 demo 只生成静态图。模型、日志和动画保存在 `outputs/`，该目录不上传 GitHub。
+
+### 已完成的实验
+
+2026-11-04 的 15×15 固定路线实验：报告延迟 3 步，完整默认特征，DQN 训练 1,500 回合，预测器使用 300 条路线训练 20 个 epoch。验证集选出第 1,200 回合模型，在 100 条独立测试路线上，DQN 成功率 **95%**，预测规划器 **59%**。
+
+这些结果对应当时的固定路线、无规则先验实验，不代表后续随机路线或其他延迟配置的表现。最后一轮验证成功率降至 43.3%，训练仍有波动，尚需多种子与消融验证。具体配置与复现命令见 [README_LOCAL.md](README_LOCAL.md)；原始结果位于本地 `outputs/dict_train_1500_20261104/`。
+
+---
+
+## 原始项目规划与团队分工
+
+以下保留研究目标、拟采用方法和后续阶段；当前可运行功能以以上说明为准。
 
 ## 1. 项目背景与核心场景（Project Overview）
 

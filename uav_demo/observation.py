@@ -13,12 +13,14 @@ def observation_features(observation, config):
     scale = config.grid_size - 1
     uav = np.asarray(observation["uav_pos"], dtype=np.float64)
     goal = np.asarray(observation["uav_goal"], dtype=np.float64)
+
     if observation["has_observation"]:
         car = np.asarray(observation["car_pos"], dtype=np.float64)
         car_position, relative_car = car / scale, (car - uav) / scale
         velocity = observation["car_velocity"]
     else:
         car_position, relative_car, velocity = (0, 0), (0, 0), (0, 0)
+
     return {
         "uav_pos": uav / scale,
         "uav_speed": observation["uav_speed"] / 2,
