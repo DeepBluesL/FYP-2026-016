@@ -198,6 +198,18 @@ def main():
     parser.add_argument("--auto-return", action="store_true", help="采集结束后自动沿最短路径返回终点")
     parser.add_argument("--car-route", choices=("fixed", "random"), default=EnvConfig().car_route,
                         help="fixed：固定起终点；random：每局随机起点和目的地，到达后换新目的地")
+    parser.add_argument("--contact-reward", type=float, default=EnvConfig().contact_reward,
+                        help="采集未完成时每次接触车辆的奖励；设为 0 做消融（该项不是势函数形式）")
+    parser.add_argument("--movement-penalty", type=float, default=EnvConfig().movement_penalty,
+                        help="每格飞行距离的代价（非正数）；设为 0 时奖励只看时间，与完成步数指标一致")
+    parser.add_argument("--reward-v2", action="store_true",
+                        help="进度与接触奖励改为势函数塑形、去掉非法移动扣分、随机路线超时未采完按失败扣分")
+    parser.add_argument("--rule-prior-feature", choices=("rule_action", "rule_distance"),
+                        default=defaults.rule_prior_feature,
+                        help="rule_action：非规则动作统一扣 b；rule_distance：按比规则动作多出的距离扣 b×格数")
+    parser.add_argument("--exploration", choices=("uniform", "softmax"), default=defaults.exploration,
+                        help="ε 探索方式：uniform 均匀随机；softmax 按含先验的 Q 抽样")
+    parser.add_argument("--exploration-temperature", type=float, default=defaults.exploration_temperature)
     parser.add_argument("--observation-features", nargs="+",
                         default=defaults.observation_features,
                         help="按顺序选择 DQN 的命名观测特征")
@@ -213,13 +225,18 @@ def main():
         epsilon_decay_steps=args.epsilon_decay_steps,
         prediction_steps=tuple(args.prediction_steps),
         observation_features=tuple(args.observation_features),
-        rule_prior=args.rule_prior,
+        rule_prior=args.rule_prior, rule_prior_feature=args.rule_prior_feature,
+        exploration=args.exploration, exploration_temperature=args.exploration_temperature,
     )
     env_config = EnvConfig(
         sensing_mode=args.sensing_mode,
         observation_delay=args.observation_delay,
         auto_return=args.auto_return,
         car_route=args.car_route,
+        contact_reward=args.contact_reward,
+        movement_penalty=args.movement_penalty,
+        reward_v2=args.reward_v2,
+        shaping_gamma=config.gamma,
     )
     train(env_config, config, args.output_dir)
 

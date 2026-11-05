@@ -118,6 +118,7 @@ class GridWorldEnv:
         if self._done:
             raise RuntimeError("请先 reset；结束的回合不能继续 step。")
         config = self.config
+        old_potential = self._potential() if config.reward_v2 else 0.0
         old_position = self.uav_pos
         finished_before = self.sensing_finished
         # 在同一个任务阶段计算前后距离，避免完成采集时切换目标产生奖励突跳。
@@ -144,17 +145,19 @@ class GridWorldEnv:
 
         # reward计算
         progress_scale = config.failed_return_progress_scale if self.sensing_failed else 1.0
-        reward = (config.step_penalty + config.movement_penalty * moved_distance
-                  + config.progress_reward * progress_scale * (old_distance - new_distance))
-        if invalid:
-            reward += config.invalid_move_penalty
+        reward = config.step_penalty + config.movement_penalty * moved_distance
+        if not config.reward_v2:
+            reward += config.progress_reward * progress_scale * (old_distance - new_distance)
+            if invalid:
+                reward += config.invalid_move_penalty
 
         # 采集设置，默认半径为 2，使用欧氏距离
         contact = self._distance(self.uav_pos, self.car_pos) <= config.sensing_radius
         if not finished_before:
             if contact:
                 self.sensing_progress += 1
-                reward += config.contact_reward
+                if not config.reward_v2:
+                    reward += config.contact_reward
             elif config.sensing_mode == "consecutive":
                 self.sensing_progress = 0
             if self.sensing_progress >= config.sensing_steps:
@@ -173,9 +176,25 @@ class GridWorldEnv:
         if terminated and self.sensing_complete:
             reward += config.success_reward
         elif truncated:
-            reward += config.timeout_penalty
+            if config.reward_v2 and config.car_route == "random" and not self.sensing_complete:
+                reward += config.sensing_failure_penalty  # 随机路线没有到站失败，超时未采完即失败
+            else:
+                reward += config.timeout_penalty
         self._done = terminated or truncated
+        if config.reward_v2:
+            new_potential = 0.0 if self._done else self._potential()
+            reward += config.shaping_gamma * new_potential - old_potential
         return self._observation(), float(reward), terminated, truncated, self._info(invalid)
+
+    def _potential(self) -> float:
+        """reward_v2 的势函数：当前阶段目标的（到感知边界）距离越近、采集进度越高，势越大。"""
+        config = self.config
+        finished = self.sensing_finished
+        distance = self._distance(self.uav_pos, config.uav_goal if finished else self.car_pos)
+        if not finished and config.progress_to_contact_boundary:
+            distance = max(0.0, distance - config.sensing_radius)
+        scale = config.failed_return_progress_scale if self.sensing_failed else 1.0
+        return -config.progress_reward * scale * distance + config.contact_reward * self.sensing_progress
 
     @staticmethod
     def _distance(first: tuple[int, int], second: tuple[int, int]) -> float:

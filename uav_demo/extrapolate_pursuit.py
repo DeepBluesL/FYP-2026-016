@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from .config import EnvConfig
-from .environment import preview_move
+from .environment import ACTIONS, preview_move
 
 
 def predicted_car(observation, config: EnvConfig) -> tuple[int, int]:
@@ -32,20 +32,28 @@ class ExtrapolatePursuit:
         """无内部状态；保留接口以便与其他控制器统一评估。"""
 
     def choose_action(self, observation, mask) -> int:
+        distances = self.action_distances(observation)
+        for action in range(len(distances)):
+            if not mask[action] or preview_move(observation["uav_pos"], observation["uav_speed"],
+                                                action, self.config.grid_size)[2]:
+                distances[action] = np.inf
+        return int(np.argmin(distances))  # 并列时取编号最小者
+
+    def action_distances(self, observation) -> np.ndarray:
+        """每个动作执行后到目标（外推车位或 UAV 终点）的欧氏距离；首报前悬停为 0、其余为 1。
+
+        越界动作原地不动，按原位置计算；是否可选由调用方的掩码决定。
+        """
         state = observation
         finished = state["sensing_complete"] or state["sensing_failed"]
+        count = len(ACTIONS)
         if not finished and not state["has_observation"]:
-            return 0  # 首次报告前悬停，与 simple_pursuit 一致
+            distances = np.ones(count)
+            distances[0] = 0.0  # 首次报告前悬停，与 simple_pursuit 一致
+            return distances
         target = state["uav_goal"] if finished else predicted_car(state, self.config)
-
-        best_action, best_distance = 0, float("inf")
-        for action in np.flatnonzero(mask):
-            position, _, invalid = preview_move(
-                state["uav_pos"], state["uav_speed"], int(action), self.config.grid_size
-            )
-            if invalid:
-                continue
-            distance = sum((a - b) ** 2 for a, b in zip(position, target))
-            if distance < best_distance:
-                best_distance, best_action = distance, int(action)
-        return best_action
+        distances = np.empty(count)
+        for action in range(count):
+            position, _, _ = preview_move(state["uav_pos"], state["uav_speed"], action, self.config.grid_size)
+            distances[action] = np.hypot(position[0] - target[0], position[1] - target[1])
+        return distances

@@ -60,6 +60,11 @@ class EnvConfig:
     invalid_move_penalty: float = -1.0
     timeout_penalty: float = -10.0
     auto_return: bool = False  # 采集结束后只允许沿最短路径飞向终点的动作；返程不再交给策略学习
+    # True：进度与接触奖励改为势函数塑形 γΦ(s')−Φ(s)（Φ = −进度权重·距离 + 接触奖励·采集进度，
+    # 终止时 Φ=0，不改变最优策略，也不能靠反复进出刷分）；不再计非法移动扣分（动作掩码已屏蔽）；
+    # 随机路线超时仍未采完按采集失败扣分，而不是只扣超时分。
+    reward_v2: bool = False
+    shaping_gamma: float = 0.99  # reward_v2 势函数塑形的折扣，应与 DQN 的 gamma 一致
 
     def __post_init__(self) -> None:
         if not isinstance(self.grid_size, int) or self.grid_size < 5:
@@ -123,6 +128,9 @@ class EnvConfig:
         if not math.isfinite(self.movement_penalty) or self.movement_penalty > 0:
             raise ValueError("movement_penalty 必须是有限非正数")
 
+        if not 0 < self.shaping_gamma <= 1:
+            raise ValueError("shaping_gamma 必须在 (0, 1] 内")
+
 
 @dataclass
 class TrainConfig:
@@ -160,6 +168,12 @@ class TrainConfig:
     # 被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价（参考残差 Q 学习）。
     # 需在 observation_features 中加入 rule_action。
     rule_prior: float = 0.0
+    # rule_action：规则动作 0、其余 −rule_prior；rule_distance：每个动作扣 rule_prior × 比规则动作多出的距离（格），
+    # 方向接近规则的动作扣得少。所选特征需在 observation_features 中。
+    rule_prior_feature: str = "rule_action"
+    # uniform：ε 探索时均匀随机选合法动作；softmax：按 softmax(含先验的 Q / 温度) 抽样（参考残差 Q 学习官方代码）。
+    exploration: str = "uniform"
+    exploration_temperature: float = 1.0
 
     @property
     def prediction_route_count(self) -> int:
@@ -205,7 +219,13 @@ class TrainConfig:
             raise ValueError("训练种子必须非负，且训练/验证种子区间不能重叠")
         if not math.isfinite(self.rule_prior) or self.rule_prior < 0:
             raise ValueError("rule_prior 必须是非负有限数")
-        if self.rule_prior > 0 and "rule_action" not in self.observation_features:
-            raise ValueError("rule_prior > 0 时 observation_features 必须包含 rule_action")
+        if self.rule_prior_feature not in ("rule_action", "rule_distance"):
+            raise ValueError("rule_prior_feature 只能取 rule_action 或 rule_distance")
+        if self.rule_prior > 0 and self.rule_prior_feature not in self.observation_features:
+            raise ValueError(f"rule_prior > 0 时 observation_features 必须包含 {self.rule_prior_feature}")
+        if self.exploration not in ("uniform", "softmax"):
+            raise ValueError("exploration 只能取 uniform 或 softmax")
+        if not math.isfinite(self.exploration_temperature) or self.exploration_temperature <= 0:
+            raise ValueError("exploration_temperature 必须为有限正数")
         if self.device not in ("cpu", "cuda", "auto"):
             raise ValueError("device 只能取 cpu、cuda 或 auto")
