@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
+from evaluate import evaluate_episode
 from uav_demo.agent import DQNAgent
 from uav_demo.config import ACTIVATION_NAMES, EnvConfig, TrainConfig
 from uav_demo.environment import GridWorldEnv
@@ -21,35 +22,22 @@ def epsilon_at(step: int, config: TrainConfig) -> float:
 
 
 def evaluate(agent: DQNAgent, env_config: EnvConfig, config: TrainConfig) -> dict:
-    """使用固定且独立的验证种子，只执行 greedy policy，不更新模型。"""
+    """使用固定且独立的验证种子，只执行 greedy policy，不更新模型；逐局逻辑复用 evaluate_episode。"""
     env = GridWorldEnv(env_config)
-    rewards, successes, sensing, successful_times, distances = [], [], [], [], []
-    sensing_failures, goal_arrivals = [], []
-    for index in range(config.eval_episodes):
-        observation, info = env.reset(seed=config.eval_seed + index)
-        episode_reward = 0.0
-        done = False
-        while not done:
-            action = agent.choose_action(observation, epsilon=0.0, mask=env.valid_action_mask())
-            observation, reward, terminated, truncated, info = env.step(action)
-            episode_reward += reward
-            done = terminated or truncated
-        rewards.append(episode_reward)
-        successes.append(info["success"])
-        sensing.append(info["sensing_complete"])
-        sensing_failures.append(info["sensing_failed"])
-        goal_arrivals.append(info["uav_reached_goal"])
-        distances.append(info["travel_distance"])
-        if info["success"]:
-            successful_times.append(info["time"])
+    rows = [evaluate_episode(agent, env, config.eval_seed + index) for index in range(config.eval_episodes)]
+    successful_steps = [row["steps"] for row in rows if row["success"]]
+
+    def mean(field):
+        return float(np.mean([row[field] for row in rows]))
+
     return {
-        "success_rate": float(np.mean(successes)),
-        "sensing_completion_rate": float(np.mean(sensing)),
-        "sensing_failure_rate": float(np.mean(sensing_failures)),
-        "uav_goal_rate": float(np.mean(goal_arrivals)),
-        "mean_reward": float(np.mean(rewards)),
-        "mean_success_steps": float(np.mean(successful_times)) if successful_times else "",
-        "mean_travel_distance": float(np.mean(distances)),
+        "success_rate": mean("success"),
+        "sensing_completion_rate": mean("sensing_complete"),
+        "sensing_failure_rate": mean("sensing_failed"),
+        "uav_goal_rate": mean("uav_reached_goal"),
+        "mean_reward": mean("total_reward"),
+        "mean_success_steps": float(np.mean(successful_steps)) if successful_steps else "",
+        "mean_travel_distance": mean("travel_distance"),
     }
 
 
@@ -205,6 +193,11 @@ def main():
         default=defaults.prediction_steps,
         help="相对当前时刻的预测步数，例如 0 1 4",
     )
+    parser.add_argument("--rule-prior", type=float, default=defaults.rule_prior,
+                        help=">0 时启用外推规则先验：偏离规则的动作在 Q 值上扣该分数；需在 --observation-features 中加入 rule_action")
+    parser.add_argument("--auto-return", action="store_true", help="采集结束后自动沿最短路径返回终点")
+    parser.add_argument("--car-route", choices=("fixed", "random"), default=EnvConfig().car_route,
+                        help="fixed：固定起终点；random：每局随机起点和目的地，到达后换新目的地")
     parser.add_argument("--observation-features", nargs="+",
                         default=defaults.observation_features,
                         help="按顺序选择 DQN 的命名观测特征")
@@ -220,10 +213,13 @@ def main():
         epsilon_decay_steps=args.epsilon_decay_steps,
         prediction_steps=tuple(args.prediction_steps),
         observation_features=tuple(args.observation_features),
+        rule_prior=args.rule_prior,
     )
     env_config = EnvConfig(
         sensing_mode=args.sensing_mode,
         observation_delay=args.observation_delay,
+        auto_return=args.auto_return,
+        car_route=args.car_route,
     )
     train(env_config, config, args.output_dir)
 

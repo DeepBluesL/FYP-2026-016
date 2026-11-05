@@ -36,11 +36,13 @@ class EnvConfig:
 
     car_move_every: int = 1  # 每隔多少个环境步移动 1 格；1 为每步一格，2 为两步一格
     observation_delay: int = 0  # 车辆的延迟观测环境step
-    car_spawn_region: str = "bottom_right"  # 兼容旧 checkpoint 的字段；当前统一固定右下角，随机起点逻辑已注释
     car_straight_prob: float = 0.65
     car_turn_prob: float = 0.15  # 左、右转各自的基础概率
     car_reverse_prob: float = 0.05
     car_goal_bias: float = 1.0  # 用 exp(bias * 靠近终点的距离) 加权方向
+    # fixed：起点右下角、终点左上角，按时到站并停留；random：每局随机起点（离 UAV 起点 8–15 格）
+    # 和随机目的地（至少 20 格外），到达后换新目的地继续行驶，策略无法从训练中记住路线。
+    car_route: str = "fixed"
 
     sensing_radius: float = 2.0
     sensing_steps: int = 5
@@ -57,6 +59,7 @@ class EnvConfig:
     success_reward: float = 100.0
     invalid_move_penalty: float = -1.0
     timeout_penalty: float = -10.0
+    auto_return: bool = False  # 采集结束后只允许沿最短路径飞向终点的动作；返程不再交给策略学习
 
     def __post_init__(self) -> None:
         if not isinstance(self.grid_size, int) or self.grid_size < 5:
@@ -73,8 +76,8 @@ class EnvConfig:
                 or self.observation_delay < 0
         ):raise ValueError('Observation_delay have to be non-negative number')
 
-        if self.car_spawn_region not in ("bottom_right", "mixed"):
-            raise ValueError("car_spawn_region 只能取 bottom_right 或 mixed")
+        if self.car_route not in ("fixed", "random"):
+            raise ValueError("car_route 只能取 fixed 或 random")
 
         if self.max_steps // self.car_move_every < 2 * (self.grid_size - 1):
             raise ValueError("时间上限太短：需保证车辆可从任意起点到达终点")
@@ -143,7 +146,7 @@ class TrainConfig:
     device: str = "cpu"
     torch_threads: int = 1
     eval_every: int = 100
-    eval_episodes: int = 10
+    eval_episodes: int = 50  # 验证局数；太少会让最佳模型的挑选不稳定
     eval_seed: int = 1_000_000
     log_every: int = 25
 
@@ -153,6 +156,10 @@ class TrainConfig:
 
     observation_features: tuple[str, ...] = DEFAULT_OBSERVATION_FEATURES
     prediction_steps: tuple[int, ...] = (4, 8, 12)
+    # >0 时启用外推规则先验：Q 值上规则动作 0、其余动作 −rule_prior（log 概率形式），
+    # 被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价（参考残差 Q 学习）。
+    # 需在 observation_features 中加入 rule_action。
+    rule_prior: float = 0.0
 
     @property
     def prediction_route_count(self) -> int:
@@ -196,5 +203,9 @@ class TrainConfig:
                               self.prediction_route_count) if self.use_motion_prediction else self.episodes
         if self.seed < 0 or self.eval_seed < self.seed + training_routes:
             raise ValueError("训练种子必须非负，且训练/验证种子区间不能重叠")
+        if not math.isfinite(self.rule_prior) or self.rule_prior < 0:
+            raise ValueError("rule_prior 必须是非负有限数")
+        if self.rule_prior > 0 and "rule_action" not in self.observation_features:
+            raise ValueError("rule_prior > 0 时 observation_features 必须包含 rule_action")
         if self.device not in ("cpu", "cuda", "auto"):
             raise ValueError("device 只能取 cpu、cuda 或 auto")

@@ -54,8 +54,6 @@ def main():
     parser.add_argument("--observation-delay", type=int, default=0)
     args = parser.parse_args()
     config = EnvConfig(
-        sensing_radius=2.0,
-        sensing_steps=5,
         sensing_mode=args.sensing_mode,
         observation_delay=args.observation_delay,
     )
