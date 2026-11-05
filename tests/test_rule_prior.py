@@ -88,5 +88,33 @@ class PersistentPriorTests(unittest.TestCase):
         self.assertAlmostEqual(float(q[other]), float(agent.online(features)[other]) - 5.0, places=4)
 
 
+class LegacyPriorModeTests(unittest.TestCase):
+    def test_init_mode_rejected_only_when_prior_enabled(self):
+        """旧模型记录了 rule_prior_mode=init：rule_prior=0 时先验未启用，应可加载；>0 时拒绝。"""
+        import tempfile
+        from pathlib import Path
+
+        import torch
+        config = EnvConfig(observation_delay=2)
+        env = GridWorldEnv(config)
+        observation, _ = env.reset(seed=7)
+        for prior in (0.0, 2.0):
+            train = TrainConfig(use_motion_prediction=False, observation_features=RULE_FEATURES,
+                                rule_prior=prior, hidden_sizes=(8,))
+            agent = DQNAgent(encode_observation(observation, config, RULE_FEATURES).size,
+                             env.action_count, train, env_config=config)
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "model.pt"
+                agent.save(path, config)
+                checkpoint = torch.load(path, weights_only=False)
+                checkpoint["train_config"]["rule_prior_mode"] = "init"
+                torch.save(checkpoint, path)
+                if prior == 0.0:
+                    DQNAgent.load(path)
+                else:
+                    with self.assertRaises(ValueError):
+                        DQNAgent.load(path)
+
+
 if __name__ == "__main__":
     unittest.main()

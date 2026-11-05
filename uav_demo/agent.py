@@ -268,7 +268,9 @@ class DQNAgent:
                     raise ValueError(f"缺少网络配置 {field}")
             train_values["device"] = device
             # 先验模式已固定为持续先验；只接受当时就用持续先验训练的模型。
-            if train_values.pop("rule_prior_mode", "persistent") != "persistent":
+            # rule_prior=0 时先验未启用，模式字段无意义，不拒绝。
+            mode = train_values.pop("rule_prior_mode", "persistent")
+            if mode != "persistent" and train_values.get("rule_prior", 0.0) > 0:
                 raise ValueError("该模型使用已移除的 init 先验模式，请重新训练")
             train_config = TrainConfig(**train_values)
         except (KeyError, TypeError, ValueError) as error:
