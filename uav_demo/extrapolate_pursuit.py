@@ -10,6 +10,7 @@ import numpy as np
 
 from .config import EnvConfig
 from .environment import preview_move
+from .prediction import observed_motion
 
 
 def predicted_car(observation, config: EnvConfig) -> tuple[int, int]:
@@ -17,7 +18,7 @@ def predicted_car(observation, config: EnvConfig) -> tuple[int, int]:
     age = observation["observation_age"]
     observed_time = observation["time"] - age
     moves = sum((observed_time + k) % config.car_move_every == 0 for k in range(1, age + 2))
-    x, y = (p + moves * v for p, v in zip(observation["car_pos"], observation["car_velocity"]))
+    x, y = (p + moves * v for p, v in zip(observation["car_pos"], observed_motion(observation["car_history"], config.car_move_every)))
     last = config.grid_size - 1
     return int(np.clip(x, 0, last)), int(np.clip(y, 0, last))
 

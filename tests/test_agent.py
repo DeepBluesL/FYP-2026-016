@@ -16,7 +16,7 @@ from uav_demo.config import EnvConfig, TrainConfig
 from uav_demo.environment import GridWorldEnv
 
 
-OBSERVATION_SIZE = 20  # 默认编码顺序的回归约定
+OBSERVATION_SIZE = 18  # 默认编码顺序的回归约定
 
 class DQNTests(unittest.TestCase):
     def config(self, **changes):
@@ -33,7 +33,7 @@ class DQNTests(unittest.TestCase):
         return folder
 
     def test_masked_actions_and_greedy_does_not_consume_randomness(self):
-        agent = DQNAgent(20, 3, self.config(), env_config=EnvConfig())
+        agent = DQNAgent(18, 3, self.config(), env_config=EnvConfig())
         with torch.no_grad():
             for parameter in agent.online.parameters():
                 parameter.zero_()
@@ -47,7 +47,7 @@ class DQNTests(unittest.TestCase):
             self.assertIn(agent.choose_action(observation, 1.0, mask), (1, 2))
 
     def test_target_ignores_invalid_next_actions_and_terminal_bootstrap(self):
-        agent = DQNAgent(20, 3, self.config(gamma=0.5), env_config=EnvConfig())
+        agent = DQNAgent(18, 3, self.config(gamma=0.5), env_config=EnvConfig())
         with torch.no_grad():
             for network in (agent.online, agent.target):
                 for parameter in network.parameters():
@@ -61,7 +61,7 @@ class DQNTests(unittest.TestCase):
         self.assertAlmostEqual(agent.update(), 1.0, places=6)
 
     def test_double_dqn_selects_online_action_but_uses_target_value(self):
-        agent = DQNAgent(20, 3, self.config(gamma=0.5), env_config=EnvConfig())
+        agent = DQNAgent(18, 3, self.config(gamma=0.5), env_config=EnvConfig())
         with torch.no_grad():
             for network in (agent.online, agent.target):
                 for parameter in network.parameters():
@@ -77,7 +77,7 @@ class DQNTests(unittest.TestCase):
         self.assertAlmostEqual(agent.update(), 1.5, places=6)
 
     def test_gradient_update_changes_weights_and_syncs_target(self):
-        agent = DQNAgent(20, 3, self.config(target_update_every=1), env_config=EnvConfig())
+        agent = DQNAgent(18, 3, self.config(target_update_every=1), env_config=EnvConfig())
         observation = GridWorldEnv().reset(seed=42)[0]
         mask = np.ones(3, dtype=bool)
         for _ in range(2):
@@ -95,7 +95,7 @@ class DQNTests(unittest.TestCase):
         env = GridWorldEnv(env_config)
         observation, _ = env.reset(seed=789)
         architecture = self.config(hidden_sizes=(12, 7), activation="tanh", leaky_relu_slope=0.2)
-        agent = DQNAgent(20, env.action_count, architecture, env_config=env.config)
+        agent = DQNAgent(18, env.action_count, architecture, env_config=env.config)
         mask = env.valid_action_mask()
         with torch.no_grad():
             original_q = agent.online(torch.from_numpy(agent._features(observation))).clone()
@@ -122,7 +122,7 @@ class DQNTests(unittest.TestCase):
         observation, _ = env.reset(seed=789)
         predictor = MotionPredictor()
         config = self.config(prediction_steps=(0, 1, 4, 8))
-        agent = DQNAgent(20, env.action_count, config,
+        agent = DQNAgent(18, env.action_count, config,
                          motion_predictor=predictor, env_config=env.config)
         input_size = OBSERVATION_SIZE + 2 * len(config.prediction_steps)
         self.assertEqual(agent.network_input_size, input_size)
@@ -164,12 +164,12 @@ class DQNTests(unittest.TestCase):
 
     def test_older_checkpoints_rejected_for_old_observation_semantics(self):
         env = GridWorldEnv()
-        agent = DQNAgent(20, env.action_count, self.config(), env_config=env.config)
+        agent = DQNAgent(18, env.action_count, self.config(), env_config=env.config)
         with self.temporary_directory() as folder:
             path = Path(folder) / "legacy.pt"
             agent.save(path, env.config)
             checkpoint = torch.load(path, weights_only=True)
-            for version in (2, 3, 4, 5, 6):
+            for version in (2, 3, 4, 5, 6, 7, 8):
                 with self.subTest(version=version):
                     checkpoint["format_version"] = version
                     torch.save(checkpoint, path)
@@ -178,7 +178,7 @@ class DQNTests(unittest.TestCase):
 
     def test_old_v4_reward_fields_keep_original_environment_semantics(self):
         env = GridWorldEnv()
-        agent = DQNAgent(20, env.action_count, self.config(), env_config=env.config)
+        agent = DQNAgent(18, env.action_count, self.config(), env_config=env.config)
         with self.temporary_directory() as folder:
             path = Path(folder) / "legacy_reward_v4.pt"
             agent.save(path, env.config)
@@ -192,12 +192,12 @@ class DQNTests(unittest.TestCase):
 
     def test_checkpoint_validates_action_semantics_observation_and_structure(self):
         env = GridWorldEnv()
-        agent = DQNAgent(20, env.action_count, self.config(), env_config=env.config)
+        agent = DQNAgent(18, env.action_count, self.config(), env_config=env.config)
         with self.temporary_directory() as folder:
             path = Path(folder) / "model.pt"
             agent.save(path, env.config)
             original = torch.load(path, weights_only=True)
-            self.assertEqual(original["format_version"], 7)
+            self.assertEqual(original["format_version"], 9)
             cases = (
                 ("count", "action_count", 9, "动作数量"),
                 ("reordered_names", "action_names", original["action_names"][::-1], "动作数量"),
@@ -242,7 +242,7 @@ class DQNTests(unittest.TestCase):
         env = GridWorldEnv(EnvConfig(observation_delay=3))
         observation, _ = env.reset(seed=42)
         for names, size in ((('time', 'uav_pos', 'has_observation'), 4),
-                            (('uav_pos', 'time', 'car_velocity', 'has_observation'), 6)):
+                            (('uav_pos', 'time', 'has_observation'), 4)):
             with self.subTest(names=names):
                 config = self.config(observation_features=names)
                 encoded = encode_observation(observation, env.config, names)
@@ -263,7 +263,7 @@ class DQNTests(unittest.TestCase):
     def test_v7_without_feature_names_uses_original_order(self):
         env = GridWorldEnv()
         observation, _ = env.reset(seed=42)
-        agent = DQNAgent(20, env.action_count, self.config(), env_config=env.config)
+        agent = DQNAgent(18, env.action_count, self.config(), env_config=env.config)
         with self.temporary_directory() as folder:
             path = Path(folder) / 'legacy_v7.pt'
             agent.save(path, env.config)
@@ -279,7 +279,7 @@ class DQNTests(unittest.TestCase):
         env = GridWorldEnv(EnvConfig(observation_delay=3, uav_start=(3, 2)))
         observation, _ = env.reset(seed=42)
         predictor = MotionPredictor()
-        agent = DQNAgent(20, env.action_count,
+        agent = DQNAgent(18, env.action_count,
                          self.config(prediction_steps=(0, 1, 4, 8)),
                          motion_predictor=predictor, env_config=env.config)
         mask = env.valid_action_mask()

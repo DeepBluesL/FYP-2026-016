@@ -4,7 +4,7 @@ import numpy as np
 DEFAULT_OBSERVATION_FEATURES = (
     "uav_pos", "uav_speed", "uav_goal", "car_pos", "time",
     "sensing_progress", "sensing_complete", "sensing_failed",
-    "relative_car", "relative_uav_goal", "car_velocity", "car_move_phase",
+    "relative_car", "relative_uav_goal", "car_move_phase",
     "observation_age", "has_observation",
 )
 
@@ -17,9 +17,8 @@ def observation_features(observation, config):
     if observation["has_observation"]:
         car = np.asarray(observation["car_pos"], dtype=np.float64)
         car_position, relative_car = car / scale, (car - uav) / scale
-        velocity = observation["car_velocity"]
     else:
-        car_position, relative_car, velocity = (0, 0), (0, 0), (0, 0)
+        car_position, relative_car = (0, 0), (0, 0)
 
     return {
         "uav_pos": uav / scale,
@@ -32,7 +31,6 @@ def observation_features(observation, config):
         "sensing_failed": observation["sensing_failed"],
         "relative_car": relative_car,
         "relative_uav_goal": (goal - uav) / scale,
-        "car_velocity": velocity,
         "car_move_phase": (observation["time"] % config.car_move_every) / config.car_move_every,
         "observation_age": observation["observation_age"] / config.max_steps,
         "has_observation": observation["has_observation"],
@@ -43,7 +41,7 @@ def observation_features(observation, config):
 FEATURE_SIZES = {
     "uav_pos": 2, "uav_speed": 1, "uav_goal": 2, "car_pos": 2, "time": 1,
     "sensing_progress": 1, "sensing_complete": 1, "sensing_failed": 1,
-    "relative_car": 2, "relative_uav_goal": 2, "car_velocity": 2, "car_move_phase": 1,
+    "relative_car": 2, "relative_uav_goal": 2, "car_move_phase": 1,
     "observation_age": 1, "has_observation": 1, "rule_action": 17,
 }
 

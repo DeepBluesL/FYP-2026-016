@@ -8,7 +8,7 @@ import torch
 
 from uav_demo.config import EnvConfig
 from uav_demo.environment import GridWorldEnv
-from uav_demo.prediction import MotionPredictor, _examples, forecast_vehicle, make_features
+from uav_demo.prediction import MotionPredictor, _examples, forecast_vehicle, make_features, observed_motion
 
 
 class MotionPredictionTests(unittest.TestCase):
@@ -49,34 +49,34 @@ class MotionPredictionTests(unittest.TestCase):
     def test_probability_mean_does_not_choose_argmax_route(self):
         model = self.uniform_predictor()
         # 四方向等概率，内部位置的期望位移为零；argmax 则会一直向北。
-        result = model.predict_positions((2, 2), (1, 0), 5, steps=(1, 2, 4))
+        result = model.predict_positions(((0, (1, 2)), (1, (2, 2))), 5, steps=(1, 2, 4))
         np.testing.assert_allclose(result, [[2, 2], [2, 2], [2, 2]])
         # 左下角只允许北/东，边界 mask 后均值应是 (0.5, 0.5)。
-        result = model.predict_positions((0, 0), (0, 0), 5, steps=(1,))
+        result = model.predict_positions(((0, (0, 0)), (1, (0, 0))), 5, steps=(1,))
         np.testing.assert_allclose(result, [[0.5, 0.5]])
 
     def test_clock_bounds_and_state_dict_roundtrip(self):
         model = self.uniform_predictor()
         with torch.no_grad():
             model.layers[-1].bias.copy_(torch.tensor([0., 20., 0., 0.]))
-        result = model.predict_positions((1, 2), (1, 0), 5,
-                                         steps=(0, 1, 2, 3), move_every=2, time=0)
+        result = model.predict_positions(((0, (1, 2)),), 5,
+                                         steps=(0, 1, 2, 3), move_every=2)
         np.testing.assert_allclose(result, [[1, 2], [1, 2], [2, 2], [2, 2]], atol=1e-5)
-        shifted = model.predict_positions((1, 2), (1, 0), 5,
-                                          steps=(1,), move_every=2, time=1)
+        shifted = model.predict_positions(((0, (0, 2)), (1, (1, 2))), 5,
+                                          steps=(1,), move_every=2)
         np.testing.assert_allclose(shifted, [[2, 2]], atol=1e-5)
-        many = model.predict_positions((4, 0), (1, 0), 5, steps=(30,))
+        many = model.predict_positions(((0, (3, 0)), (1, (4, 0))), 5, steps=(30,))
         self.assertTrue(((many >= 0) & (many <= 4)).all())
         restored = MotionPredictor()
         restored.load_state_dict(model.state_dict())
         np.testing.assert_allclose(
-            restored.predict_positions((1, 2), (1, 0), 5, steps=(4, 8, 12)),
-            model.predict_positions((1, 2), (1, 0), 5, steps=(4, 8, 12)),
+            restored.predict_positions(((0, (0, 2)), (1, (1, 2))), 5, steps=(4, 8, 12)),
+            model.predict_positions(((0, (0, 2)), (1, (1, 2))), 5, steps=(4, 8, 12)),
         )
         restored = MotionPredictor.from_state(model.export_state())
         np.testing.assert_allclose(
-            restored.predict_positions((1, 2), (1, 0), 5, steps=(4, 8, 12)),
-            model.predict_positions((1, 2), (1, 0), 5, steps=(4, 8, 12)),
+            restored.predict_positions(((0, (0, 2)), (1, (1, 2))), 5, steps=(4, 8, 12)),
+            model.predict_positions(((0, (0, 2)), (1, (1, 2))), 5, steps=(4, 8, 12)),
         )
         invalid = model.export_state()
         invalid['directions'].reverse()
@@ -97,9 +97,25 @@ class MotionPredictionTests(unittest.TestCase):
         self.assertTrue(np.isfinite(metrics['holdout_cross_entropy']))
         self.assertTrue(0 <= metrics['holdout_accuracy'] <= 1)
         with patch('uav_demo.prediction.generate_vehicle_trajectory', side_effect=AssertionError('future leak')):
-            forecast = model.predict_positions((2, 1), (0, 1), 5, steps=(4, 8, 12))
+            forecast = model.predict_positions(((0, (2, 0)), (1, (2, 1))), 5, steps=(4, 8, 12))
         self.assertEqual(forecast.shape, (3, 2))
         self.assertTrue(np.isfinite(forecast).all())
+
+    def test_motion_uses_report_times_and_preserves_direction_through_stops(self):
+        np.testing.assert_array_equal(observed_motion(((0, (2, 2)),), 2), (0, 0))
+        history = ((0, (1, 2)), (4, (3, 2)), (5, (3, 2)))
+        np.testing.assert_array_equal(observed_motion(history, 2), (1, 0))
+        np.testing.assert_array_equal(observed_motion(history, 1), (0.5, 0))
+
+    def test_training_features_match_motion_inferred_from_history(self):
+        from uav_demo.vehicle import generate_vehicle_trajectory
+        config = EnvConfig(grid_size=5, max_steps=20, uav_goal=(4, 4), car_move_every=2)
+        route, _ = generate_vehicle_trajectory(config, np.random.default_rng(42))
+        features, _, _ = _examples(config, [42])
+        moving_times = np.flatnonzero(np.any(np.diff(route, axis=0), axis=1))
+        for feature, t in zip(features, moving_times):
+            history = tuple((i, tuple(route[i])) for i in range(t + 1))
+            np.testing.assert_allclose(feature, make_features(route[t], observed_motion(history, 2), 5))
 
     def test_invalid_training_seed_split_rejected(self):
         for seeds in ([], [1], [1, 1], [-1, 2]):
@@ -122,7 +138,7 @@ class MotionPredictionTests(unittest.TestCase):
         with torch.no_grad():
             predictor.layers[-1].bias.copy_(torch.tensor([0., 20., 0., 0.]))
         # 当前 t=4，报告来自 t=1；下一次移动发生在 t=2。
-        state = {"has_observation": True, "car_pos": (1, 2), "car_velocity": (1, 0),
+        state = {"has_observation": True, "car_pos": (1, 2), "car_history": ((0, (0, 2)), (1, (1, 2))),
                  "time": 4, "observation_age": 3}
         forecast = forecast_vehicle(predictor, state, config, (0, 1, 2))
         np.testing.assert_allclose(forecast, [[3, 2], [3, 2], [4, 2]], atol=1e-5)

@@ -13,7 +13,8 @@ from uav_demo.agent import DQNAgent
 from uav_demo.config import ACTIVATION_NAMES, EnvConfig, TrainConfig
 from uav_demo.environment import GridWorldEnv
 from uav_demo.observation import encode_observation
-from uav_demo.prediction import MotionPredictor
+from uav_demo.prediction_data import split_route_seeds
+from uav_demo.sequence_prediction import fit_sequence_predictor
 
 
 def epsilon_at(step: int, config: TrainConfig) -> float:
@@ -53,17 +54,33 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
     predictor = None
     if config.use_motion_prediction:
         # 只使用训练种子生成监督样本；验证和最终测试路线都不能进入预测器拟合。
-        prediction_count = config.prediction_route_count
-        print(f"Fitting vehicle motion model on {prediction_count} training routes...", flush=True)
-        predictor, prediction_metrics = MotionPredictor.fit(
-            env_config, range(config.seed, config.seed + prediction_count),
-            epochs=config.prediction_epochs, seed=config.seed,
+
+        groups = split_route_seeds(
+            route_count=config.prediction_routes,
+            start_seed=config.prediction_seed,
+            split_seed=config.prediction_split_seed,
         )
+
+        print(f"Fitting sequence model on {len(groups['train'])} training routes...", flush=True)
+        predictor, prediction_metrics = fit_sequence_predictor(
+            env_config,
+            groups,
+            model_type=config.prediction_model_type,
+            learning_rate=config.prediction_learning_rate,
+            batch_size=config.prediction_batch_size,
+            device=config.prediction_device,
+            hidden_size=config.prediction_hidden_size,
+            head_size=config.prediction_head_size,
+            num_layers=config.prediction_num_layers,
+            epochs=config.prediction_epochs,
+            seed=config.seed,
+        )
+
         (output_dir / "prediction_metrics.json").write_text(
             json.dumps(prediction_metrics, indent=2), encoding="utf-8",
         )
-        print(f"Motion model: direction accuracy={prediction_metrics['holdout_accuracy']:.1%}, "
-              f"straight baseline={prediction_metrics['straight_baseline_accuracy']:.1%}", flush=True)
+        print(f"Motion model: validation MSE={prediction_metrics['best_validation_mse']:.6f}",
+              flush=True)
     sample, _ = env.reset(seed=config.seed)
     observation_size = encode_observation(sample, env_config, config.observation_features).size
     agent = DQNAgent(observation_size, env.action_count, config,
@@ -103,8 +120,8 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
                     observation, action, reward, next_observation, done, next_mask
                 )
                 if (
-                    agent.environment_steps >= config.learning_starts
-                    and agent.environment_steps % config.train_every == 0
+                        agent.environment_steps >= config.learning_starts
+                        and agent.environment_steps % config.train_every == 0
                 ):
                     loss = agent.update()
                     if loss is not None:
@@ -185,6 +202,15 @@ def main():
     parser.add_argument("--no-motion-prediction", action="store_true", help="关闭学习预测特征，作当前状态消融对照")
     parser.add_argument("--prediction-routes", type=int, default=defaults.prediction_routes)
     parser.add_argument("--prediction-epochs", type=int, default=defaults.prediction_epochs)
+    parser.add_argument("--prediction-seed", type=int, default=defaults.prediction_seed)
+    parser.add_argument("--prediction-split-seed", type=int, default=defaults.prediction_split_seed)
+    parser.add_argument("--prediction-learning-rate", type=float, default=defaults.prediction_learning_rate)
+    parser.add_argument("--prediction-batch-size", type=int, default=defaults.prediction_batch_size)
+    parser.add_argument("--prediction-hidden-size", type=int, default=defaults.prediction_hidden_size)
+    parser.add_argument("--prediction-head-size", type=int, default=defaults.prediction_head_size)
+    parser.add_argument("--prediction-num-layers", type=int, default=defaults.prediction_num_layers)
+    parser.add_argument("--prediction-model-type", choices=("rnn", "lstm", "gru"), default=defaults.prediction_model_type)
+    parser.add_argument("--prediction-device", choices=("auto", "cuda", "cpu"), default=defaults.prediction_device)
     parser.add_argument("--epsilon-decay-steps", type=int, default=defaults.epsilon_decay_steps)
     parser.add_argument(
         "--prediction-steps",
@@ -214,6 +240,15 @@ def main():
         activation=args.activation, leaky_relu_slope=args.leaky_relu_slope,
         use_motion_prediction=not args.no_motion_prediction,
         prediction_routes=args.prediction_routes, prediction_epochs=args.prediction_epochs,
+        prediction_seed=args.prediction_seed,
+        prediction_split_seed=args.prediction_split_seed,
+        prediction_learning_rate=args.prediction_learning_rate,
+        prediction_batch_size=args.prediction_batch_size,
+        prediction_hidden_size=args.prediction_hidden_size,
+        prediction_head_size=args.prediction_head_size,
+        prediction_num_layers=args.prediction_num_layers,
+        prediction_model_type=args.prediction_model_type,
+        prediction_device=args.prediction_device,
         epsilon_decay_steps=args.epsilon_decay_steps,
         prediction_steps=tuple(args.prediction_steps),
         observation_features=tuple(args.observation_features),

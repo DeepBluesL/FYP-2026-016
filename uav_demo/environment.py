@@ -90,7 +90,7 @@ class GridWorldEnv:
         self.sensing_complete = False
         self.sensing_failed = False
         self.car_velocity = (0, 0)
-        self.car_observation_history = [(self.car_pos, self.car_velocity)]
+        self.car_observation_history = [(0, self.car_pos)]
         self.travel_distance = 0.0
         self._done = False
         return self._observation(), self._info(invalid_move=False)
@@ -136,7 +136,7 @@ class GridWorldEnv:
         displacement = tuple(b - a for a, b in zip(old_car, self.car_pos))
         if any(displacement):
             self.car_velocity = displacement
-        self.car_observation_history.append((self.car_pos, self.car_velocity))
+        self.car_observation_history.append((self.time, self.car_pos))
 
         new_target = config.uav_goal if finished_before else self.car_pos
         new_distance = self._distance(self.uav_pos, new_target)
@@ -206,19 +206,14 @@ class GridWorldEnv:
         #决定UAV可见车辆哪一刻的位置
         observation_time = self.time - self.config.observation_delay
         has_observation = observation_time >= 0
-        #读取可见位置的车辆位置和最近一次的位移
-        if has_observation:
-            position, velocity = self.car_observation_history[observation_time]
-            car_pos = tuple(int(v) for v in position)
-            car_velocity = tuple(int(v) for v in velocity)
-        else:
-            car_pos, car_velocity = None, None
+        history = tuple(self.car_observation_history[:observation_time + 1]) if has_observation else ()
+        car_pos = history[-1][1] if history else None
         return {
             "uav_pos": tuple(self.uav_pos),
             "uav_speed": self.uav_speed,
             "uav_goal": tuple(self.config.uav_goal),
             "car_pos": car_pos,
-            "car_velocity": car_velocity,
+            "car_history": history,
             "time": self.time,
             "sensing_progress": self.sensing_progress,
             "sensing_complete": self.sensing_complete,

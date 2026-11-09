@@ -24,7 +24,7 @@ from uav_demo.environment import ACTION_NAMES, ACTIONS, preview_move  # noqa: E4
 from uav_demo.planner import minimum_travel_steps  # noqa: E402
 
 MODELS = Path(__file__).resolve().parent / "models"
-REQUIRED_KEYS = ("uav_pos", "uav_speed", "uav_goal", "car_pos", "car_velocity", "time", "sensing_progress",
+REQUIRED_KEYS = ("uav_pos", "uav_speed", "uav_goal", "car_pos", "car_history", "time", "sensing_progress",
                  "sensing_complete", "sensing_failed", "observation_age", "has_observation")
 
 __all__ = ["Policy", "ObservationBuilder", "ACTIONS", "ACTION_NAMES"]
@@ -81,7 +81,7 @@ class ObservationBuilder:
     """把仿真端收到的延迟车辆报告整理成模型要的观测；每回合新建一个。
 
     report(t, pos) 记录“第 t 步时刻车的位置”这条报告（仿真端在它到达时调用，t 是位置对应的时刻）。
-    车速 car_velocity 取最近一次非零位移（相邻两条报告之差），与训练环境一致。
+    只保存已经到达的定位报告，按报告时间排序后提供给策略。
     """
 
     def __init__(self, config):
@@ -93,20 +93,13 @@ class ObservationBuilder:
 
     def build(self, time: int, uav_pos, uav_speed: int, sensing_progress: int,
               sensing_complete: bool, sensing_failed: bool = False) -> dict:
-        latest = max((t for t in self.reports if t <= time), default=None)
-        car_pos = car_velocity = None
-        if latest is not None:
-            car_pos, car_velocity = self.reports[latest], (0, 0)
-            for t in range(latest, 0, -1):
-                if t in self.reports and t - 1 in self.reports:
-                    step = tuple(b - a for a, b in zip(self.reports[t - 1], self.reports[t]))
-                    if any(step):
-                        car_velocity = step
-                        break
+        history = tuple((t, self.reports[t]) for t in sorted(self.reports) if t <= time)
+        latest = history[-1][0] if history else None
+        car_pos = history[-1][1] if history else None
         return {
             "uav_pos": tuple(int(v) for v in uav_pos), "uav_speed": int(uav_speed),
             "uav_goal": tuple(self.config.uav_goal),
-            "car_pos": car_pos, "car_velocity": car_velocity, "time": int(time),
+            "car_pos": car_pos, "car_history": history, "time": int(time),
             "sensing_progress": int(sensing_progress), "sensing_complete": bool(sensing_complete),
             "sensing_failed": bool(sensing_failed),
             "observation_age": time - latest if latest is not None else 0,
@@ -119,7 +112,7 @@ def _normalized(observation: dict) -> dict:
     if missing:
         raise KeyError(f"观测缺少字段 {missing}")
     result = dict(observation)
-    for key in ("uav_pos", "uav_goal", "car_pos", "car_velocity"):
+    for key in ("uav_pos", "uav_goal", "car_pos"):
         if result[key] is not None:
             result[key] = tuple(int(v) for v in result[key])
     return result
