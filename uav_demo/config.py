@@ -163,6 +163,8 @@ class TrainConfig:
     prediction_seed: int = 100_000
     prediction_split_seed: int = 42
     prediction_model_type: str = "lstm"
+    prediction_tcn_blocks: int = 4
+    prediction_tcn_kernel_size: int = 3
     prediction_var_lags: int = 4  # VAR 使用最近多少个报告时刻的位置
     prediction_learning_rate: float = 0.001
     prediction_batch_size: int = 32

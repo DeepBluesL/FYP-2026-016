@@ -79,6 +79,8 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
                 hidden_size=config.prediction_hidden_size,
                 head_size=config.prediction_head_size,
                 num_layers=config.prediction_num_layers,
+                tcn_blocks=config.prediction_tcn_blocks,
+                tcn_kernel_size=config.prediction_tcn_kernel_size,
                 epochs=config.prediction_epochs,
                 seed=config.seed,
             )
@@ -219,6 +221,8 @@ def main():
     parser.add_argument("--prediction-num-layers", type=int, default=defaults.prediction_num_layers)
     parser.add_argument("--prediction-var-lags", type=int, default=defaults.prediction_var_lags,
                         help="VAR 使用的历史位置数量，默认 4")
+    parser.add_argument("--prediction-tcn-blocks", type=int, default=defaults.prediction_tcn_blocks)
+    parser.add_argument("--prediction-tcn-kernel-size", type=int, default=defaults.prediction_tcn_kernel_size)
     parser.add_argument("--prediction-model-type", default=defaults.prediction_model_type)
     parser.add_argument("--prediction-device", choices=("auto", "cuda", "cpu"), default=defaults.prediction_device)
     parser.add_argument("--epsilon-decay-steps", type=int, default=defaults.epsilon_decay_steps)
@@ -258,6 +262,8 @@ def main():
         prediction_head_size=args.prediction_head_size,
         prediction_num_layers=args.prediction_num_layers,
         prediction_var_lags=args.prediction_var_lags,
+        prediction_tcn_blocks=args.prediction_tcn_blocks,
+        prediction_tcn_kernel_size=args.prediction_tcn_kernel_size,
         prediction_model_type=args.prediction_model_type,
         prediction_device=args.prediction_device,
         epsilon_decay_steps=args.epsilon_decay_steps,

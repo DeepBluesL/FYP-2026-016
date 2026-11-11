@@ -159,12 +159,20 @@ def run_epoch(model, config, seeds, optimizer=None, *, batch_size=32, generator=
 
 def fit_sequence_predictor(config, groups, model_type="lstm", epochs=20, seed=42, *,
                            learning_rate=0.001, batch_size=32, device="auto",
-                           hidden_size=256, head_size=128, num_layers=1):
+                           hidden_size=256, head_size=128, num_layers=1,
+                           tcn_blocks=4, tcn_kernel_size=3):
     torch.manual_seed(seed)
 
-    model = SequencePredictor(model_type=model_type, max_steps=config.max_steps,
-                              hidden_size=hidden_size, head_size=head_size,
-                              num_layers=num_layers).to(prediction_device(device))
+    if model_type == "tcn":
+        from .tcn_prediction import TCNPredictor
+        model = TCNPredictor(hidden_size=hidden_size, head_size=head_size,
+                             num_blocks=tcn_blocks, kernel_size=tcn_kernel_size,
+                             max_steps=config.max_steps)
+    else:
+        model = SequencePredictor(model_type=model_type, max_steps=config.max_steps,
+                                  hidden_size=hidden_size, head_size=head_size,
+                                  num_layers=num_layers)
+    model = model.to(prediction_device(device))
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     generator = torch.Generator().manual_seed(seed)
 
@@ -198,8 +206,12 @@ def fit_sequence_predictor(config, groups, model_type="lstm", epochs=20, seed=42
         "device": str(next(model.parameters()).device),
         "hidden_size": hidden_size,
         "head_size": head_size,
-        "num_layers": num_layers,
         "seed": seed,
         "epochs": epochs,
     }
+    if model_type == "tcn":
+        metrics.update(tcn_blocks=tcn_blocks, tcn_kernel_size=tcn_kernel_size,
+                       receptive_field=model.receptive_field)
+    else:
+        metrics["num_layers"] = num_layers
     return model, metrics

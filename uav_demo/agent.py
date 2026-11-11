@@ -283,7 +283,24 @@ class DQNAgent:
 
         saved_predictor = checkpoint.get("motion_predictor")
         if saved_predictor is not None:
-            if saved_predictor.get("model_type") in ("rnn", "lstm", "gru"):
+            if saved_predictor.get("model_type") == "tcn":
+                from .tcn_prediction import TCNPredictor
+                from .sequence_prediction import prediction_device
+                predictor = TCNPredictor(
+                    hidden_size=saved_predictor["hidden_size"],
+                    head_size=saved_predictor["head_size"],
+                    num_blocks=saved_predictor["num_blocks"],
+                    kernel_size=saved_predictor["kernel_size"],
+                    max_steps=saved_predictor["max_steps"],
+                )
+                predictor.load_state_dict(saved_predictor["state_dict"])
+                predictor.to(prediction_device(train_config.prediction_device))
+                predictor.eval()
+            elif saved_predictor.get("model_type") == "var":
+                from .var_prediction import VARPredictor
+                predictor = VARPredictor(lags=saved_predictor["lags"])
+                predictor.coefficients = np.asarray(saved_predictor["coefficients"], dtype=np.float64)
+            elif saved_predictor.get("model_type") in ("rnn", "lstm", "gru"):
                 from .sequence_prediction import SequencePredictor
                 predictor = SequencePredictor.from_state(saved_predictor, device=train_config.prediction_device)
             else:
