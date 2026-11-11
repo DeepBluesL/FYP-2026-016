@@ -163,6 +163,7 @@ class TrainConfig:
     prediction_seed: int = 100_000
     prediction_split_seed: int = 42
     prediction_model_type: str = "lstm"
+    prediction_var_lags: int = 4  # VAR 使用最近多少个报告时刻的位置
     prediction_learning_rate: float = 0.001
     prediction_batch_size: int = 32
     prediction_device: str = "auto"
@@ -218,8 +219,6 @@ class TrainConfig:
             raise ValueError("prediction_routes 至少为 10，以划分训练/验证/测试三组")
         if self.prediction_seed < 0 or self.prediction_split_seed < 0:
             raise ValueError("预测器种子必须非负")
-        if self.prediction_model_type not in ("rnn", "lstm", "gru"):
-            raise ValueError("prediction_model_type 只能取 rnn、lstm 或 gru")
         if self.prediction_device not in ("cpu", "cuda", "auto"):
             raise ValueError("prediction_device 只能取 cpu、cuda 或 auto")
         if not math.isfinite(self.prediction_learning_rate) or self.prediction_learning_rate <= 0:

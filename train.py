@@ -61,25 +61,33 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
             split_seed=config.prediction_split_seed,
         )
 
-        print(f"Fitting sequence model on {len(groups['train'])} training routes...", flush=True)
-        predictor, prediction_metrics = fit_sequence_predictor(
-            env_config,
-            groups,
-            model_type=config.prediction_model_type,
-            learning_rate=config.prediction_learning_rate,
-            batch_size=config.prediction_batch_size,
-            device=config.prediction_device,
-            hidden_size=config.prediction_hidden_size,
-            head_size=config.prediction_head_size,
-            num_layers=config.prediction_num_layers,
-            epochs=config.prediction_epochs,
-            seed=config.seed,
-        )
+        print(f"Fitting {config.prediction_model_type} model on {len(groups['train'])} training routes...", flush=True)
+        if config.prediction_model_type == "var":
+            from uav_demo.var_prediction import VARPredictor
+            predictor, prediction_metrics = VARPredictor.fit(
+                env_config, groups, lags=config.prediction_var_lags,
+            )
+            validation_mse = prediction_metrics["validation_mse"]
+        else:
+            predictor, prediction_metrics = fit_sequence_predictor(
+                env_config,
+                groups,
+                model_type=config.prediction_model_type,
+                learning_rate=config.prediction_learning_rate,
+                batch_size=config.prediction_batch_size,
+                device=config.prediction_device,
+                hidden_size=config.prediction_hidden_size,
+                head_size=config.prediction_head_size,
+                num_layers=config.prediction_num_layers,
+                epochs=config.prediction_epochs,
+                seed=config.seed,
+            )
+            validation_mse = prediction_metrics["best_validation_mse"]
 
         (output_dir / "prediction_metrics.json").write_text(
             json.dumps(prediction_metrics, indent=2), encoding="utf-8",
         )
-        print(f"Motion model: validation MSE={prediction_metrics['best_validation_mse']:.6f}",
+        print(f"Motion model: validation MSE={validation_mse:.6f}",
               flush=True)
     sample, _ = env.reset(seed=config.seed)
     observation_size = encode_observation(sample, env_config, config.observation_features).size
@@ -209,7 +217,9 @@ def main():
     parser.add_argument("--prediction-hidden-size", type=int, default=defaults.prediction_hidden_size)
     parser.add_argument("--prediction-head-size", type=int, default=defaults.prediction_head_size)
     parser.add_argument("--prediction-num-layers", type=int, default=defaults.prediction_num_layers)
-    parser.add_argument("--prediction-model-type", choices=("rnn", "lstm", "gru"), default=defaults.prediction_model_type)
+    parser.add_argument("--prediction-var-lags", type=int, default=defaults.prediction_var_lags,
+                        help="VAR 使用的历史位置数量，默认 4")
+    parser.add_argument("--prediction-model-type", default=defaults.prediction_model_type)
     parser.add_argument("--prediction-device", choices=("auto", "cuda", "cpu"), default=defaults.prediction_device)
     parser.add_argument("--epsilon-decay-steps", type=int, default=defaults.epsilon_decay_steps)
     parser.add_argument(
@@ -247,6 +257,7 @@ def main():
         prediction_hidden_size=args.prediction_hidden_size,
         prediction_head_size=args.prediction_head_size,
         prediction_num_layers=args.prediction_num_layers,
+        prediction_var_lags=args.prediction_var_lags,
         prediction_model_type=args.prediction_model_type,
         prediction_device=args.prediction_device,
         epsilon_decay_steps=args.epsilon_decay_steps,
