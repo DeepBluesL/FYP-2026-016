@@ -10,7 +10,7 @@ from uav_demo.observation import encode_observation
 from uav_demo.vehicle import generate_vehicle_trajectory
 
 
-OBSERVATION_SIZE = 20  # 默认编码顺序的回归约定
+OBSERVATION_SIZE = 18  # 默认编码顺序的回归约定
 
 class VehicleTests(unittest.TestCase):
     def test_seeded_routes_stay_in_bounds_reach_goal_and_obey_clock(self):
@@ -67,7 +67,7 @@ class EnvironmentTests(unittest.TestCase):
         self.assertNotIn('car_goal', observation)
         self.assertNotIn('sensing_finished', observation)
         np.testing.assert_array_equal(encode_observation(observation, env.config),
-            np.asarray([0, 0, .5, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1], dtype=np.float32))
+            np.asarray([0, 0, .5, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1], dtype=np.float32))
         next_observation, *_ = env.step(1)
         np.testing.assert_array_equal(
             encode_observation(next_observation, env.config, ('time', 'uav_pos')),
@@ -80,7 +80,7 @@ class EnvironmentTests(unittest.TestCase):
         observation, _ = env.reset(seed=42)
         self.assertEqual(encode_observation(observation, env.config).dtype, np.float32)
         self.assertEqual(encode_observation(observation, env.config).shape, (OBSERVATION_SIZE,))
-        self.assertEqual(20, OBSERVATION_SIZE)
+        self.assertEqual(18, OBSERVATION_SIZE)
         self.assertEqual(observation["sensing_failed"], 0)  # 采集失败标志
         # 当前状态相同，任意更换真正的未来轨迹，策略能看到的输入也必须相同。
         env.car_trajectory[1:] = (4, 0)
@@ -97,22 +97,18 @@ class EnvironmentTests(unittest.TestCase):
             with self.subTest(horizon=horizon):
                 env = self.make_env(max_steps=horizon)
                 observation, _ = env.reset(seed=42)
-                self.assertEqual(20, OBSERVATION_SIZE)
+                self.assertEqual(18, OBSERVATION_SIZE)
                 self.assertEqual(encode_observation(observation, env.config).shape, (OBSERVATION_SIZE,))
 
-    def test_car_velocity_uses_only_observed_moves_and_reset_clears_it(self):
+    def test_history_contains_positions_and_times_and_reset_clears_it(self):
         env = self.make_env(car_move_every=2)
-        env.car_trajectory[:] = (2, 2)
-        env.car_trajectory[:2] = (3, 1)
-        env.car_trajectory[2:4] = (2, 1)
-        np.testing.assert_array_equal(env._observation()["car_velocity"], (0, 0))
-        for expected, phase in (((0, 0), 0.5), ((-1, 0), 0), ((-1, 0), 0.5), ((0, 1), 0)):
-            observation, _, _, _, info = env.step(0)
-            np.testing.assert_array_equal(observation["car_velocity"], expected)
-            self.assertEqual(tuple(info["car_velocity"]), expected)
-            self.assertEqual(encode_observation(observation, env.config)[17], phase)
+        initial = env._observation()
+        observation, *_ = env.step(0)
+        self.assertNotIn("car_velocity", observation)
+        self.assertEqual(observation["car_history"], ((0, initial["car_pos"]), (1, env.car_pos)))
+        self.assertEqual(initial["car_history"], ((0, initial["car_pos"]),))
         observation, _ = env.reset(seed=42)
-        np.testing.assert_array_equal(observation["car_velocity"], (0, 0))
+        self.assertEqual(observation["car_history"], ((0, env.car_pos),))
 
     def test_first_report_arrives_after_delay_and_contains_initial_position(self):
         env = self.make_env(observation_delay=3, uav_start=(1, 1))
@@ -123,14 +119,14 @@ class EnvironmentTests(unittest.TestCase):
             self.assertEqual(state["time"], time)
             self.assertFalse(state["has_observation"])
             self.assertIsNone(state["car_pos"])
-            self.assertIsNone(state["car_velocity"])
+            self.assertEqual(state["car_history"], ())
             self.assertEqual(state["observation_age"], 0)
-            np.testing.assert_array_equal(encode_observation(observation, env.config)[[5, 6, 11, 12, 15, 16]], 0)
+            np.testing.assert_array_equal(encode_observation(observation, env.config)[[5, 6, 11, 12]], 0)
             observation, _, _, _, info = env.step(0)
         state = observation
         self.assertTrue(state["has_observation"])
         np.testing.assert_array_equal(state["car_pos"], initial_position)
-        np.testing.assert_array_equal(state["car_velocity"], (0, 0))
+        self.assertEqual(state["car_history"], ((0, initial_position),))
         self.assertEqual(state["observation_age"], 3)
         self.assertEqual(info["observed_car_pos"], list(initial_position))
         observation, *_ = env.step(0)
@@ -139,9 +135,19 @@ class EnvironmentTests(unittest.TestCase):
         observation, _ = env.reset(seed=43)
         self.assertFalse(observation["has_observation"])
 
+    def test_unreceived_history_does_not_change_observation(self):
+        env = self.make_env(observation_delay=3)
+        for _ in range(5):
+            env.step(0)
+        before = env._observation()
+        self.assertEqual([t for t, _ in before["car_history"]], [0, 1, 2])
+        env.car_observation_history[3:] = [(t, (0, 0)) for t in range(3, 6)]
+        env.car_trajectory[3:] = (0, 0)
+        self.assertEqual(env._observation(), before)
+
     def test_zero_delay_is_valid_even_when_reported_position_is_zero(self):
         env = self.make_env(observation_delay=0)
-        env.car_observation_history[0] = ((0, 0), (0, 0))
+        env.car_observation_history[0] = (0, (0, 0))
         state = env._observation()
         self.assertTrue(state["has_observation"])
         np.testing.assert_array_equal(state["car_pos"], (0, 0))
@@ -150,7 +156,7 @@ class EnvironmentTests(unittest.TestCase):
     def test_hidden_initial_state_and_goal_do_not_change_observation(self):
         env = self.make_env(observation_delay=4)
         observation = env._observation()
-        env.car_observation_history[0] = ((2, 3), (1, 0))
+        env.car_observation_history[0] = (0, (2, 3))
         env.car_trajectory[:] = (2, 3)
         env.car_goal = (4, 4)
         self.assertEqual(env._observation(), observation)

@@ -9,7 +9,9 @@ from uav_demo.simple_pursuit import choose_action as greedy_action
 
 
 def report(car_pos, car_velocity, time, age):
-    return {"car_pos": car_pos, "car_velocity": car_velocity, "time": time, "observation_age": age}
+    previous = tuple(p - v for p, v in zip(car_pos, car_velocity))
+    return {"car_pos": car_pos, "car_history": ((time - age - 2, previous), (time - age - 1, car_pos), (time - age, car_pos)),
+            "time": time, "observation_age": age}
 
 
 class ExtrapolatePursuitTests(unittest.TestCase):

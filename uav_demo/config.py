@@ -159,7 +159,19 @@ class TrainConfig:
     log_every: int = 25
 
     use_motion_prediction: bool = True
-    prediction_routes: int = 300
+    prediction_routes: int = 1000  # 三组路线的总数，不受 DQN episodes 限制
+    prediction_seed: int = 100_000
+    prediction_split_seed: int = 42
+    prediction_model_type: str = "lstm"
+    prediction_tcn_blocks: int = 4
+    prediction_tcn_kernel_size: int = 3
+    prediction_var_lags: int = 4  # VAR 使用最近多少个报告时刻的位置
+    prediction_learning_rate: float = 0.001
+    prediction_batch_size: int = 32
+    prediction_device: str = "auto"
+    prediction_hidden_size: int = 256
+    prediction_head_size: int = 128
+    prediction_num_layers: int = 1
     prediction_epochs: int = 20
 
     observation_features: tuple[str, ...] = DEFAULT_OBSERVATION_FEATURES
@@ -168,11 +180,6 @@ class TrainConfig:
     # 被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价（参考残差 Q 学习）。
     # 需在 observation_features 中加入 rule_action。
     rule_prior: float = 0.0
-
-    @property
-    def prediction_route_count(self) -> int:
-        """启用预测器时使用的路线数，至少两条以划分拟合与内部验证集。"""
-        return max(2, min(self.prediction_routes, self.episodes))
 
     def __post_init__(self) -> None:
         self.observation_features = tuple(self.observation_features)
@@ -188,7 +195,8 @@ class TrainConfig:
         positive_fields = (
             "episodes", "batch_size", "replay_capacity", "train_every", "target_update_every",
             "epsilon_decay_steps", "torch_threads", "eval_every", "eval_episodes", "log_every",
-            "prediction_routes", "prediction_epochs",
+            "prediction_routes", "prediction_epochs", "prediction_batch_size",
+            "prediction_hidden_size", "prediction_head_size", "prediction_num_layers",
         )
         for name in positive_fields:
             value = getattr(self, name)
@@ -207,10 +215,24 @@ class TrainConfig:
             raise ValueError("gamma 必须在 [0, 1] 范围内")
         if not 0 <= self.epsilon_end <= self.epsilon_start <= 1:
             raise ValueError("epsilon 必须满足 0 <= end <= start <= 1")
-        training_routes = max(self.episodes,
-                              self.prediction_route_count) if self.use_motion_prediction else self.episodes
-        if self.seed < 0 or self.eval_seed < self.seed + training_routes:
-            raise ValueError("训练种子必须非负，且训练/验证种子区间不能重叠")
+        if self.seed < 0 or self.eval_seed < self.seed + self.episodes:
+            raise ValueError("训练种子必须非负，且 DQN 训练/验证种子区间不能重叠")
+        if self.prediction_routes < 10:
+            raise ValueError("prediction_routes 至少为 10，以划分训练/验证/测试三组")
+        if self.prediction_seed < 0 or self.prediction_split_seed < 0:
+            raise ValueError("预测器种子必须非负")
+        if self.prediction_device not in ("cpu", "cuda", "auto"):
+            raise ValueError("prediction_device 只能取 cpu、cuda 或 auto")
+        if not math.isfinite(self.prediction_learning_rate) or self.prediction_learning_rate <= 0:
+            raise ValueError("prediction_learning_rate 必须为有限正数")
+        if self.use_motion_prediction:
+            start, end = self.prediction_seed, self.prediction_seed + self.prediction_routes
+            for name, other_start, other_end in (
+                ("DQN 训练", self.seed, self.seed + self.episodes),
+                ("DQN 验证", self.eval_seed, self.eval_seed + self.eval_episodes),
+            ):
+                if start < other_end and end > other_start:
+                    raise ValueError(f"预测器种子区间与{name}重叠")
         if not math.isfinite(self.rule_prior) or self.rule_prior < 0:
             raise ValueError("rule_prior 必须是非负有限数")
         if self.rule_prior > 0 and "rule_action" not in self.observation_features:

@@ -17,8 +17,8 @@ def check_test_seeds(agent, seed: int, episodes: int) -> None:
     ranges = [("DQN 训练", cfg.seed, cfg.seed + cfg.episodes),
               ("验证", cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)]
     if agent.motion_predictor is not None:
-        count = cfg.prediction_route_count
-        ranges.append(("车辆预测器训练/内部验证", cfg.seed, cfg.seed + count))
+        ranges.append(("车辆预测器训练/验证/测试", cfg.prediction_seed,
+                       cfg.prediction_seed + cfg.prediction_routes))
     for name, start, end in ranges:
         if seed < end and seed + episodes > start:
             raise ValueError(f"测试种子与{name}区间 [{start}, {end}) 重叠")

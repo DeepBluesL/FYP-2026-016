@@ -111,8 +111,7 @@ class DQNAgent:
         observed_time = state["time"] - age
 
         key = (
-            tuple(state["car_pos"]),
-            tuple(state["car_velocity"]),
+            tuple((t, tuple(p)) for t, p in state["car_history"]),
             observed_time % cfg.car_move_every,
             tuple(age + h for h in steps),
         )
@@ -215,7 +214,7 @@ class DQNAgent:
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
-                "format_version": 7,
+                "format_version": 9,
                 "observation_mode": "delayed_vehicle",
                 "network_input_size": self.network_input_size,
                 "motion_predictor": self.motion_predictor.export_state() if self.motion_predictor is not None else None,
@@ -239,8 +238,8 @@ class DQNAgent:
         if not isinstance(checkpoint, dict):
             raise ValueError("模型文件必须包含 checkpoint 字典。")
 
-        if checkpoint.get("format_version") != 7:
-            raise ValueError("旧版模型与隐藏终点及有效观测标志不兼容，请重新训练。")
+        if checkpoint.get("format_version") != 9:
+            raise ValueError("旧版模型与当前预测器结构及种子配置不兼容，请重新训练。")
         if checkpoint.get("observation_mode") != "delayed_vehicle":
             raise ValueError("模型观测模式与当前车辆观测接口不兼容。")
 
@@ -288,9 +287,31 @@ class DQNAgent:
             raise ValueError("模型观测维度与保存的特征配置不一致，请重新训练。")
         predictor = None
 
-        if checkpoint.get("motion_predictor") is not None:
-            from .prediction import MotionPredictor
-            predictor = MotionPredictor.from_state(checkpoint["motion_predictor"])
+        saved_predictor = checkpoint.get("motion_predictor")
+        if saved_predictor is not None:
+            if saved_predictor.get("model_type") == "tcn":
+                from .tcn_prediction import TCNPredictor
+                from .sequence_prediction import prediction_device
+                predictor = TCNPredictor(
+                    hidden_size=saved_predictor["hidden_size"],
+                    head_size=saved_predictor["head_size"],
+                    num_blocks=saved_predictor["num_blocks"],
+                    kernel_size=saved_predictor["kernel_size"],
+                    max_steps=saved_predictor["max_steps"],
+                )
+                predictor.load_state_dict(saved_predictor["state_dict"])
+                predictor.to(prediction_device(train_config.prediction_device))
+                predictor.eval()
+            elif saved_predictor.get("model_type") == "var":
+                from .var_prediction import VARPredictor
+                predictor = VARPredictor(lags=saved_predictor["lags"])
+                predictor.coefficients = np.asarray(saved_predictor["coefficients"], dtype=np.float64)
+            elif saved_predictor.get("model_type") in ("rnn", "lstm", "gru"):
+                from .sequence_prediction import SequencePredictor
+                predictor = SequencePredictor.from_state(saved_predictor, device=train_config.prediction_device)
+            else:
+                from .prediction import MotionPredictor
+                predictor = MotionPredictor.from_state(saved_predictor)
         agent = cls(checkpoint["observation_size"], checkpoint["action_count"], train_config,
                     motion_predictor=predictor, env_config=env_config)
 

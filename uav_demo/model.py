@@ -31,6 +31,7 @@ class QNetwork(nn.Module):
         for width in hidden_sizes:
             layers.extend((nn.Linear(input_size, width), activation_factory()))
             input_size = width
+
         # Q 值可正可负，输出层保持线性，不能添加概率或截断激活。
         layers.append(nn.Linear(input_size, action_count))
         self.layers = nn.Sequential(*layers)

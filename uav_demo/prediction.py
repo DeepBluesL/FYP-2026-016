@@ -1,4 +1,4 @@
-"""仅从当前可见车辆状态学习下一次移动方向，再递归预测未来位置均值。
+"""从已收到的历史定位报告推导运动，再递归预测未来位置均值。
 
 离线监督标签来自调用方提供的训练种子，推理接口不接收真实未来轨迹。
 均值预测是轻量近似，不代表一条必然发生、整格可执行的车辆路线。
@@ -58,6 +58,19 @@ def _examples(config: EnvConfig, seeds: list[int]) -> tuple[np.ndarray, np.ndarr
         masks.append(_legal_directions(positions, config.grid_size))
     return np.concatenate(features), np.concatenate(labels), np.concatenate(masks)
 
+def observed_motion(history, move_every):
+    """从已收到的 (报告时间, 位置) 推导每次移动的位移；首报方向未知。
+
+    沿用最近非零运动；报告有间隔时按其中的可移动次数取平均。
+    """
+    for (t0, p0), (t1, p1) in reversed(list(zip(history, history[1:]))):
+        displacement = np.asarray(p1, dtype=np.float32) - p0
+        moves = t1 // move_every - t0 // move_every
+        if moves > 0 and np.any(displacement):
+            return displacement / moves
+    return np.zeros(2, dtype=np.float32)
+
+
 def forecast_vehicle(predictor, state, config, steps):
     """steps 相对当前时刻；无有效报告时返回 None，不预测占位坐标。"""
     steps = tuple(steps)
@@ -68,19 +81,18 @@ def forecast_vehicle(predictor, state, config, steps):
         or h < 0
         for h in steps
     ):
-        raise ValueError("steps 必须是非空的非负整数序列")
+        raise ValueError("`steps` must be a non-empty sequence of non-negative integers")
 
     if not state["has_observation"]:
         return None
+
     age = state["observation_age"]
 
     return predictor.predict_positions(
-        state["car_pos"],
-        state["car_velocity"],
+        state["car_history"],
         config.grid_size,
         steps=tuple(age + h for h in steps),
         move_every=config.car_move_every,
-        time=state["time"] - age,
     )
 
 
@@ -192,23 +204,24 @@ class MotionPredictor(nn.Module):
         return predictor, metrics
 
     def predict_positions(
-            self, position, velocity, grid_size: int,
-            steps: tuple[int, ...], move_every: int = 1, time: int = 0,
+            self, history, grid_size: int,
+            steps: tuple[int, ...], move_every: int = 1,
     ) -> np.ndarray:
-        """返回各未来环境时距的预测位置均值，shape=(len(steps), 2)。
+        """返回相对最后报告时刻各时距的预测位置均值，shape=(len(steps), 2)。
 
         每次可移动时对四方向 softmax 概率取期望位移，再递归传播位置和
         方向均值；这是近似均值传播，既不是 argmax 路线，也不是精确联合分布。
-        只使用传入的当前状态和训练后的权重，绝不读取真实未来路线。
+        只使用传入的历史定位报告和训练后的权重，绝不读取真实未来路线。
         """
         if not steps or any(
                 isinstance(step, bool) or not isinstance(step, (int, np.integer)) or step < 0 for step in steps):
             raise ValueError("steps 必须是非空的非负整数时距列表")
+        time, position = history[-1]
         if not isinstance(move_every, int) or move_every < 1 or not isinstance(time, int) or time < 0:
             raise ValueError("move_every 必须是正整数，time 必须是非负整数")
 
         position = np.asarray(position, dtype=np.float32).copy()
-        velocity = np.asarray(velocity, dtype=np.float32).copy()
+        velocity = observed_motion(history, move_every)
 
         make_features(position, velocity, grid_size)  # 共用形状与有限数检查
         if position.shape != (2,) or velocity.shape != (2,):

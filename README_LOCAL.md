@@ -12,16 +12,30 @@ UAV Path Planning for Dynamic Target Tracking and Sensing under Different Observ
 | 特征 `rule_action` | 外推贪心本步所选动作的 17 维 one-hot |
 | `--rule-prior b` | 规则先验：Q 值上规则动作 0、其余动作 −b（log 概率形式）；被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价（参考 Li et al., NeurIPS 2023 残差 Q 学习的形式） |
 | `compare_delay.py` | 外推贪心与 DQN（多种子）逐路线配对比较：完成时间（失败记 150 步）、bootstrap 95% CI、Wilcoxon |
+| `--reward-v2` | 简化奖励：距离进度与接触奖励改为势函数塑形 γΦ(s′)−Φ(s)，Φ = −0.2×到目标距离 + 2×采集进度（Ng et al. 1999，不改变最优策略，不能靠进出采集范围刷分）；不计非法移动扣分（动作掩码已屏蔽）；随机路线超时未采完按采集失败扣分 |
+| `--movement-penalty x` | 每格飞行代价（默认 −0.1）；0 时奖励只看时间，与完成步数指标一致 |
 
-训练与比较命令（不使用学习预测器）：
+训练与比较命令（推荐设置：简化奖励、b=0.1，不使用学习预测器）：
 
 ```powershell
 $F = "uav_pos uav_speed uav_goal car_pos time sensing_progress sensing_complete sensing_failed relative_car relative_uav_goal car_velocity car_move_phase observation_age has_observation".Split(" ")
-python train.py --episodes 1500 --seed 0 --observation-delay 6 --auto-return --car-route random --no-motion-prediction --observation-features @F rule_action --rule-prior 2 --output-dir outputs/rnd_keep2_d6_seed0
-python compare_delay.py --checkpoints outputs/rnd_keep2_d6_seed0/best_model.pt outputs/rnd_keep2_d6_seed1/best_model.pt outputs/rnd_keep2_d6_seed2/best_model.pt --output outputs/dqn_compare/rnd_keep2_d6.json
+python train.py --episodes 1500 --seed 0 --observation-delay 6 --auto-return --car-route random --no-motion-prediction --observation-features @F rule_action --rule-prior 0.1 --reward-v2 --movement-penalty 0 --output-dir outputs/rnd_keep0.1v2_d6_seed0
+python compare_delay.py --checkpoints outputs/rnd_keep0.1v2_d6_seed0/best_model.pt outputs/rnd_keep0.1v2_d6_seed1/best_model.pt outputs/rnd_keep0.1v2_d6_seed2/best_model.pt --output outputs/dqn_compare/rnd_keep0.1v2_d6.json
 ```
 
-随机车辆路线、自动返程，测试种子 3000000–3000199（200 条路线），每组 3 个训练种子，1500 回合。
+简化奖励下的结果（三种方法用同一套奖励；测试种子 3000000–3000199，3 个训练种子；括号内为比外推贪心快的步数）：
+
+| d | 外推贪心 成功率 / 完成时间 | 纯 DQN | **外推规则先验 DQN（b=0.1）** | b=0.1 比纯 DQN |
+| --- | --- | --- | --- | --- |
+| 4 | 99.5% / 57.9 | 97.5–100% / 41.1（+16.8） | **100% / 42.7（+15.2，p=6×10⁻¹⁶）** | 慢 1.6 [−3.3, 0.1] |
+| 6 | 86% / 81.4 | 90–98.5% / 55.6（+25.8） | **99–99.5% / 48.2（+33.2，p=6×10⁻³⁰）** | 快 7.4 [4.5, 10.4] |
+| 8 | 62.5% / 106.9 | 84–93.5% / 62.8（+44.1） | **96.5–97% / 55.5（+51.4，p=2×10⁻³¹）** | 快 7.3 [3.2, 11.3] |
+
+b 在选择用种子 2000000–2000199 上选定（与测试种子不重叠）；简化奖励下 b=2 先验过强，d=8 完成时间 71.2，比纯 DQN 慢。
+旧奖励下纯 DQN 不稳定的结论主要来自旧奖励（接触奖励可刷分、飞行代价）；换成简化奖励后纯 DQN 也能学好，
+规则先验的作用是在大延迟下更快、更稳。
+
+以下为旧奖励（默认奖励）、b=2 的结果。随机车辆路线、自动返程，测试种子 3000000–3000199（200 条路线），每组 3 个训练种子，1500 回合。
 “DQN 更快”= 外推贪心完成时间 − DQN 完成时间（逐路线取三个种子平均）：
 
 | d | 外推贪心 成功率 / 完成时间 | 纯 DQN | **外推规则先验 DQN（b=2）** |

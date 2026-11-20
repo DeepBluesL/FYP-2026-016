@@ -79,7 +79,7 @@ class GridWorldEnv:
         return int(point[0]), int(point[1])
 
     def reset(self, seed: int | None = None) -> tuple[dict, dict]:
-        """重置环境，seed 固定时生成相同车辆路线。"""
+        #重新生成车辆路线，种子固定时路线不改变
         self.car_trajectory, self.car_goal = generate_vehicle_trajectory(
             self.config, np.random.default_rng(seed)
         )
@@ -90,7 +90,7 @@ class GridWorldEnv:
         self.sensing_complete = False
         self.sensing_failed = False
         self.car_velocity = (0, 0)
-        self.car_observation_history = [(self.car_pos, self.car_velocity)]
+        self.car_observation_history = [(0, self.car_pos)]
         self.travel_distance = 0.0
         self._done = False
         return self._observation(), self._info(invalid_move=False)
@@ -116,7 +116,8 @@ class GridWorldEnv:
 
     def step(self, action: int) -> tuple[dict, float, bool, bool, dict]:
         if self._done:
-            raise RuntimeError("请先 reset；结束的回合不能继续 step。")
+            raise RuntimeError("Please reset first; you cannot continue stepping in a round that has ended.")
+
         config = self.config
         old_potential = self._potential() if config.reward_v2 else 0.0
         old_position = self.uav_pos
@@ -135,7 +136,7 @@ class GridWorldEnv:
         displacement = tuple(b - a for a, b in zip(old_car, self.car_pos))
         if any(displacement):
             self.car_velocity = displacement
-        self.car_observation_history.append((self.car_pos, self.car_velocity))
+        self.car_observation_history.append((self.time, self.car_pos))
 
         new_target = config.uav_goal if finished_before else self.car_pos
         new_distance = self._distance(self.uav_pos, new_target)
@@ -202,20 +203,17 @@ class GridWorldEnv:
         return float(np.hypot(first[0] - second[0], first[1] - second[1]))
 
     def _observation(self) -> dict:
+        #决定UAV可见车辆哪一刻的位置
         observation_time = self.time - self.config.observation_delay
         has_observation = observation_time >= 0
-        if has_observation:
-            position, velocity = self.car_observation_history[observation_time]
-            car_pos = tuple(int(v) for v in position)
-            car_velocity = tuple(int(v) for v in velocity)
-        else:
-            car_pos, car_velocity = None, None
+        history = tuple(self.car_observation_history[:observation_time + 1]) if has_observation else ()
+        car_pos = history[-1][1] if history else None
         return {
             "uav_pos": tuple(self.uav_pos),
             "uav_speed": self.uav_speed,
             "uav_goal": tuple(self.config.uav_goal),
             "car_pos": car_pos,
-            "car_velocity": car_velocity,
+            "car_history": history,
             "time": self.time,
             "sensing_progress": self.sensing_progress,
             "sensing_complete": self.sensing_complete,

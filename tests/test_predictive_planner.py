@@ -8,12 +8,15 @@ import numpy as np
 from uav_demo.config import EnvConfig
 from uav_demo.environment import ACTION_NAMES, GridWorldEnv
 from uav_demo.predictive_planner import PredictivePlanner
+from uav_demo.prediction import observed_motion
 
 
 class StraightPredictor:
     """测试模型仅按已观测速度外推，不持有环境或真实轨迹。"""
 
-    def predict_positions(self, position, velocity, grid_size, steps, move_every=1, time=0):
+    def predict_positions(self, history, grid_size, steps, move_every=1):
+        time, position = history[-1]
+        velocity = observed_motion(history, move_every)
         moves = (time + np.asarray(steps)) // move_every - time // move_every
         return np.clip(np.asarray(position) + moves[:, None] * np.asarray(velocity), 0, grid_size - 1)
 
@@ -37,8 +40,8 @@ class PredictivePlannerTests(unittest.TestCase):
         env.car_trajectory[:, 0] = np.minimum(np.arange(61), 14)
         env.car_trajectory[:, 1] = 5
         env.car_goal = (14, 5)
-        env.car_velocity = (1, 0)
-        env.car_observation_history = [(env.car_pos, env.car_velocity)]
+        env.time = 1
+        env.car_observation_history = [(0, (0, 5)), (1, env.car_pos)]
         planner = PredictivePlanner(StraightPredictor(), config)
         pre_contact_hovers, first_contact = 0, None
         while True:
@@ -100,7 +103,7 @@ class PredictivePlannerTests(unittest.TestCase):
         self.assertEqual(planner.last_predictions.shape,
                          (planner.horizon + env.config.sensing_steps, 2))
         predictor.predict_positions.assert_called_once()
-        self.assertEqual(predictor.predict_positions.call_args.kwargs["time"], 0)
+        self.assertEqual(predictor.predict_positions.call_args.args[0][-1][0], 0)
         self.assertEqual(predictor.predict_positions.call_args.kwargs["steps"][0], 3)
 
 
