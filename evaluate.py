@@ -16,7 +16,7 @@ def check_test_seeds(agent, seed: int, episodes: int) -> None:
     cfg = agent.config
     ranges = [("DQN 训练", cfg.seed, cfg.seed + cfg.episodes),
               ("验证", cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)]
-    if agent.motion_predictor is not None:
+    if agent.motion_predictor is not None or getattr(agent, "contact_model", None) is not None:
         ranges.append(("车辆预测器训练/验证/测试", cfg.prediction_seed,
                        cfg.prediction_seed + cfg.prediction_routes))
     for name, start, end in ranges:
@@ -78,7 +78,7 @@ def main() -> None:
         check_test_seeds(agent, args.seed, args.episodes)
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
-    env = GridWorldEnv(config)
+    env = GridWorldEnv(config, expose_truth=agent.config.needs_true_trajectory)
     controller = None
     if args.policy == "predictive":
         from uav_demo.predictive_planner import PredictivePlanner

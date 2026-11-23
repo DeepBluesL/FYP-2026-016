@@ -87,12 +87,19 @@ def forecast_vehicle(predictor, state, config, steps):
         return None
 
     age = state["observation_age"]
+    extra = {}
+    if getattr(predictor, "needs_truth", False):
+        # 读真实目的地的诊断预测器（网格推演 goal 来源），只能作上限。
+        if "true_car_goals" not in state:
+            raise ValueError("该预测器需要真实目的地序列，环境须以 expose_truth=True 创建")
+        extra["goals"] = state["true_car_goals"]
 
     return predictor.predict_positions(
         state["car_history"],
         config.grid_size,
         steps=tuple(age + h for h in steps),
         move_every=config.car_move_every,
+        **extra,
     )
 
 

@@ -52,12 +52,15 @@ class GridWorldEnv:
 
     action_count = len(ACTIONS)
 
-    def __init__(self, config: EnvConfig | None = None):
+    def __init__(self, config: EnvConfig | None = None, expose_truth: bool = False):
         self.config = config if config is not None else EnvConfig()
+        # 仅真实位置诊断打开：观测里附带完整真实轨迹和目的地序列。默认关闭，观测只含智能体能看到的延迟报告。
+        self.expose_truth = expose_truth
         self.uav_pos = tuple(self.config.uav_start)
         self.uav_speed = self.config.initial_speed
         self.car_trajectory = np.empty((self.config.max_steps + 1, 2), dtype=np.int64)
         self.car_goal = (0, 0)
+        self.car_goals = np.empty_like(self.car_trajectory)  # 各时刻车辆正前往的目的地，见 vehicle.py
         self.time = 0
         self.sensing_progress = 0
         self.sensing_complete = False
@@ -80,8 +83,8 @@ class GridWorldEnv:
 
     def reset(self, seed: int | None = None) -> tuple[dict, dict]:
         #重新生成车辆路线，种子固定时路线不改变
-        self.car_trajectory, self.car_goal = generate_vehicle_trajectory(
-            self.config, np.random.default_rng(seed)
+        self.car_trajectory, self.car_goal, self.car_goals = generate_vehicle_trajectory(
+            self.config, np.random.default_rng(seed), with_goals=True
         )
         self.uav_pos = tuple(self.config.uav_start)
         self.uav_speed = self.config.initial_speed
@@ -208,7 +211,7 @@ class GridWorldEnv:
         has_observation = observation_time >= 0
         history = tuple(self.car_observation_history[:observation_time + 1]) if has_observation else ()
         car_pos = history[-1][1] if history else None
-        return {
+        observation = {
             "uav_pos": tuple(self.uav_pos),
             "uav_speed": self.uav_speed,
             "uav_goal": tuple(self.config.uav_goal),
@@ -221,6 +224,10 @@ class GridWorldEnv:
             "observation_age": self.time - observation_time if has_observation else 0,
             "has_observation": has_observation,
         }
+        if self.expose_truth:
+            observation["true_car_trajectory"] = self.car_trajectory
+            observation["true_car_goals"] = self.car_goals
+        return observation
 
     def _info(self, invalid_move: bool) -> dict:
         contact = self._distance(self.uav_pos, self.car_pos) <= self.config.sensing_radius

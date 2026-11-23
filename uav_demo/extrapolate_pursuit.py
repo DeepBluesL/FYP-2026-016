@@ -32,12 +32,16 @@ class ExtrapolatePursuit:
     def reset(self) -> None:
         """无内部状态；保留接口以便与其他控制器统一评估。"""
 
-    def choose_action(self, observation, mask) -> int:
+    def choose_action(self, observation, mask, car_target=None) -> int:
+        """car_target 给定时追它（例如预测器给出的下一步车位），否则追线性外推点。"""
         state = observation
         finished = state["sensing_complete"] or state["sensing_failed"]
         if not finished and not state["has_observation"]:
             return 0  # 首次报告前悬停，与 simple_pursuit 一致
-        target = state["uav_goal"] if finished else predicted_car(state, self.config)
+        if finished:
+            target = state["uav_goal"]
+        else:
+            target = predicted_car(state, self.config) if car_target is None else car_target
 
         best_action, best_distance = 0, float("inf")
         for action in np.flatnonzero(mask):

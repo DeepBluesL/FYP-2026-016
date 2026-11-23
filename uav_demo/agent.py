@@ -12,7 +12,11 @@ from .environment import (
     ACTIONS, ACTION_NAMES, GridWorldEnv,
 
 )
+from .contact_prior import CONTACT_EPSILON
+from .extrapolate_pursuit import ExtrapolatePursuit, predicted_car
+from .linear_prediction import LinearPredictor
 from .observation import encode_observation, feature_slice
+from .oracle_prediction import OraclePredictor
 from .prediction import forecast_vehicle
 from .model import QNetwork
 
@@ -60,7 +64,7 @@ class ReplayBuffer:
 
 class DQNAgent:
     def __init__(self, observation_size: int, action_count: int, config: TrainConfig,
-                 motion_predictor=None, *, env_config: EnvConfig):
+                 motion_predictor=None, *, env_config: EnvConfig, contact_model=None):
         self.config = config
         self.observation_size = observation_size
         self.action_count = action_count
@@ -71,11 +75,16 @@ class DQNAgent:
         # 被拟合的 Q 不含先验，偏离规则的代价在训练中持续存在（参考残差 Q 学习）。
         self._rule_slice = (feature_slice(config.observation_features, "rule_action")
                             if config.rule_prior > 0 else None)
+        if config.uses_contact_model and contact_model is None:
+            raise ValueError("contact_prior 或 contact_probability 特征需要接触概率模型")
+        self.contact_model = contact_model
 
         self.network_input_size = observation_size + (
             2 * len(config.prediction_steps)
             if motion_predictor is not None else 0
         )
+        # 接触先验用的 17 个接触概率接在网络输入之后一起存进回放池，只进先验，不进网络。
+        self.prior_input_size = action_count if config.contact_prior > 0 else 0
 
         self.device = resolve_device(config.device)
         torch.set_num_threads(config.torch_threads)
@@ -98,15 +107,21 @@ class DQNAgent:
         self.environment_steps = 0
         self.gradient_steps = 0
 
-    def predict_car(self, observation) -> np.ndarray | None:
+    def predict_car(self, observation, steps=None) -> np.ndarray | None:
+        """steps 默认取 config.prediction_steps；规则用 steps=(1,) 取下一步车位。"""
         if self.motion_predictor is None:
             return None
 
         cfg = self.env_config
         state = observation
+        steps = self.config.prediction_steps if steps is None else tuple(steps)
+        if getattr(self.motion_predictor, "model_type", None) == "oracle":
+            return self.motion_predictor.forecast(state, cfg.max_steps, steps)
         if not state["has_observation"]:
             return None
-        steps = self.config.prediction_steps
+        if getattr(self.motion_predictor, "needs_truth", False):
+            # 结果还取决于真实目的地序列，不能只按报告历史缓存。
+            return forecast_vehicle(self.motion_predictor, state, cfg, steps)
         age = state["observation_age"]
         observed_time = state["time"] - age
 
@@ -126,19 +141,49 @@ class DQNAgent:
 
         return self._prediction_cache[key].copy()
 
+    def rule_target(self, observation):
+        """规则追的下一步车位；无报告时为 None。"""
+        if not observation["has_observation"]:
+            return None
+        source = self.config.rule_source
+        if source == "oracle":
+            if "true_car_trajectory" not in observation:
+                raise ValueError("真实位置对照需要以 expose_truth=True 创建环境")
+            point = observation["true_car_trajectory"][min(observation["time"] + 1, self.env_config.max_steps)]
+            return tuple(int(v) for v in point)
+        if source == "predictor":
+            return tuple(float(v) for v in self.predict_car(observation, steps=(1,))[0])
+        return predicted_car(observation, self.env_config)
+
+    def rule_action(self, observation, mask=None) -> int:
+        if mask is None:
+            mask = np.ones(self.action_count, dtype=bool)
+        return ExtrapolatePursuit(self.env_config).choose_action(observation, mask, self.rule_target(observation))
+
     def _features(self, observation):
         features = encode_observation(observation, self.env_config, self.config.observation_features)
-        if self.motion_predictor is None:
-            return features
-        predicted = self.predict_car(observation)
-        if predicted is None:
-            relative = np.zeros((len(self.config.prediction_steps), 2), dtype=np.float32)
-        else:
-            scale = self.env_config.grid_size - 1
-            relative = predicted / scale - np.asarray(
-                [v / scale for v in observation["uav_pos"]], dtype=np.float32
-            )
-        return np.concatenate((features, relative.reshape(-1))).astype(np.float32)
+        if self.config.rule_source != "linear" and "rule_action" in self.config.observation_features:
+            # 编码时按线性外推填了规则动作，这里换成本 agent 的规则来源。
+            rule = feature_slice(self.config.observation_features, "rule_action")
+            features[rule] = 0.0
+            features[rule.start + self.rule_action(observation)] = 1.0
+        contact = (self.contact_model.probabilities(observation, self.env_config)
+                   if self.contact_model is not None else None)
+        if "contact_probability" in self.config.observation_features:
+            features[feature_slice(self.config.observation_features, "contact_probability")] = contact
+        if self.motion_predictor is not None:
+            predicted = self.predict_car(observation)
+            if predicted is None:
+                relative = np.zeros((len(self.config.prediction_steps), 2), dtype=np.float32)
+            else:
+                scale = self.env_config.grid_size - 1
+                relative = predicted / scale - np.asarray(
+                    [v / scale for v in observation["uav_pos"]], dtype=np.float32
+                )
+            features = np.concatenate((features, relative.reshape(-1)))
+        if self.prior_input_size:
+            features = np.concatenate((features, contact))
+        return features.astype(np.float32)
 
     def choose_action(self, observation, epsilon: float = 0.0, mask=None) -> int:
         if not 0.0 <= epsilon <= 1.0:
@@ -175,7 +220,7 @@ class DQNAgent:
         dones = torch.as_tensor(dones, dtype=torch.bool, device=self.device)
         next_masks = torch.as_tensor(next_masks, dtype=torch.bool, device=self.device)
         # 被拟合的是不含先验的残差 Q；先验只进入动作选择和下一步目标。
-        fitted = self.online(observations)
+        fitted = self.online(observations[:, :self.network_input_size])
         predicted = fitted.gather(1, actions[:, None]).squeeze(1)
         with torch.no_grad():
             next_actions = self._q(self.online, next_observations).masked_fill(~next_masks, -torch.inf).argmax(dim=1)
@@ -193,13 +238,26 @@ class DQNAgent:
             self.target.load_state_dict(self.online.state_dict())
         return float(loss.item())
 
+    @property
+    def current_rule_prior(self) -> float:
+        """规则先验当前的强度；rule_prior_decay_steps > 0 时按已走的环境步线性减到 0。"""
+        decay = self.config.rule_prior_decay_steps
+        if decay == 0:
+            return self.config.rule_prior
+        return self.config.rule_prior * max(0.0, 1.0 - self.environment_steps / decay)
+
     def _q(self, network, features):
-        """用于选动作和下一步目标的 Q 值；启用 rule_prior 时加上规则先验（规则 one-hot 位于特征向量中）。"""
-        q = network(features)
+        """用于选动作和下一步目标的 Q 值；启用 rule_prior 时加上规则先验（规则 one-hot 位于特征向量中），
+        启用 contact_prior 时加上接触先验（接触概率接在网络输入之后）。"""
+        q = network(features[..., :self.network_input_size])
         if self._rule_slice is not None:
             onehot = features[..., self._rule_slice]
             # log 概率形式：规则动作 0，其余 −rule_prior；用扣分而非加分，避免按步累积正奖励。
-            q = q + self.config.rule_prior * (onehot - 1)
+            q = q + self.current_rule_prior * (onehot - 1)
+        if self.prior_input_size:
+            # 同样是扣分形式：接触概率最大的动作为 0，其余按 log 概率差扣分。
+            log_p = torch.log(features[..., self.network_input_size:] + CONTACT_EPSILON)
+            q = q + self.config.contact_prior * (log_p - log_p.max(dim=-1, keepdim=True).values)
         return q
 
     def save(self, path: str | Path, env_config: EnvConfig):
@@ -218,6 +276,7 @@ class DQNAgent:
                 "observation_mode": "delayed_vehicle",
                 "network_input_size": self.network_input_size,
                 "motion_predictor": self.motion_predictor.export_state() if self.motion_predictor is not None else None,
+                "contact_model": self.contact_model.export_state() if self.contact_model is not None else None,
                 "observation_size": self.observation_size,
                 "action_count": self.action_count,
                 "action_names": list(ACTION_NAMES),
@@ -277,6 +336,11 @@ class DQNAgent:
                 if train_values.pop(field, default) != default:
                     raise ValueError(f"该模型使用已移除的选项 {field}，请重新训练")
             train_values.pop("exploration_temperature", None)
+            # 已移除的诊断选项（真实车位加噪声/平移）：取默认值时等于没用，可以忽略；用过的模型不再支持。
+            for field, unused in (("rule_noise", 0.0), ("rule_noise_corr", 0.0), ("rule_offset", 0.0),
+                                  ("prediction_oracle_noise", [])):
+                if train_values.pop(field, unused) not in (unused, ()):
+                    raise ValueError(f"该模型使用已移除的诊断选项 {field}，不再支持加载")
             train_config = TrainConfig(**train_values)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("模型中的网络或训练配置缺失或无效。") from error
@@ -289,7 +353,14 @@ class DQNAgent:
 
         saved_predictor = checkpoint.get("motion_predictor")
         if saved_predictor is not None:
-            if saved_predictor.get("model_type") == "tcn":
+            if saved_predictor.get("model_type") == "oracle":
+                predictor = OraclePredictor()
+            elif saved_predictor.get("model_type") == "linear":
+                predictor = LinearPredictor()
+            elif saved_predictor.get("model_type") == "grid":
+                from .grid_prediction import GridPredictor
+                predictor = GridPredictor.from_state(saved_predictor)
+            elif saved_predictor.get("model_type") == "tcn":
                 from .tcn_prediction import TCNPredictor
                 from .sequence_prediction import prediction_device
                 predictor = TCNPredictor(
@@ -306,14 +377,24 @@ class DQNAgent:
                 from .var_prediction import VARPredictor
                 predictor = VARPredictor(lags=saved_predictor["lags"])
                 predictor.coefficients = np.asarray(saved_predictor["coefficients"], dtype=np.float64)
+            elif saved_predictor.get("model_type") == "goal_filter":
+                from .goal_inference import GoalFilterPredictor
+                predictor = GoalFilterPredictor.from_state(saved_predictor)
+            elif saved_predictor.get("model_type") == "direction_lstm":
+                from .direction_prediction import DirectionPredictor
+                predictor = DirectionPredictor.from_state(saved_predictor, device=train_config.prediction_device)
             elif saved_predictor.get("model_type") in ("rnn", "lstm", "gru"):
                 from .sequence_prediction import SequencePredictor
                 predictor = SequencePredictor.from_state(saved_predictor, device=train_config.prediction_device)
             else:
                 from .prediction import MotionPredictor
                 predictor = MotionPredictor.from_state(saved_predictor)
+        contact_model = None
+        if checkpoint.get("contact_model") is not None:
+            from .contact_prior import ContactModel
+            contact_model = ContactModel.from_state(checkpoint["contact_model"])
         agent = cls(checkpoint["observation_size"], checkpoint["action_count"], train_config,
-                    motion_predictor=predictor, env_config=env_config)
+                    motion_predictor=predictor, env_config=env_config, contact_model=contact_model)
 
         if checkpoint.get("network_input_size") != agent.network_input_size:
             raise ValueError("模型预测特征维度与网络输入不一致。")
