@@ -1,4 +1,4 @@
-"""独立测试 DQN 或学习模型拦截控制器，记录感知、到达及严格的等车指标。"""
+"""独立测试 DQN，记录感知、到达及严格的等车指标。"""
 
 import argparse
 import csv
@@ -16,7 +16,7 @@ def check_test_seeds(agent, seed: int, episodes: int) -> None:
     cfg = agent.config
     ranges = [("DQN 训练", cfg.seed, cfg.seed + cfg.episodes),
               ("验证", cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)]
-    if agent.motion_predictor is not None or getattr(agent, "contact_model", None) is not None:
+    if agent.motion_predictor is not None:
         ranges.append(("车辆预测器训练/验证/测试", cfg.prediction_seed,
                        cfg.prediction_seed + cfg.prediction_routes))
     for name, start, end in ranges:
@@ -67,7 +67,6 @@ def evaluate_episode(agent, env, seed: int, controller=None) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="当前状态策略的独立测试，不使用 Oracle 控制动作。")
-    parser.add_argument("--policy", choices=("dqn", "predictive"), default="dqn")
     parser.add_argument("--checkpoint", type=Path, default=Path("outputs/current_prediction_20261022/wait_train/best_model.pt"))
     parser.add_argument("--episodes", type=int, default=100)
     parser.add_argument("--seed", type=int, default=3_000_000)
@@ -79,22 +78,13 @@ def main() -> None:
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
     env = GridWorldEnv(config, expose_truth=agent.config.needs_true_trajectory)
-    controller = None
-    if args.policy == "predictive":
-        from uav_demo.predictive_planner import PredictivePlanner
-        if agent.motion_predictor is None:
-            parser.error("预测拦截策略需要车辆运动预测器")
-        controller = PredictivePlanner(agent.motion_predictor, config)
-    rows = [evaluate_episode(agent, env, seed, controller) for seed in range(args.seed, args.seed + args.episodes)]
+    rows = [evaluate_episode(agent, env, seed) for seed in range(args.seed, args.seed + args.episodes)]
     rate = lambda field: sum(bool(row[field]) for row in rows) / len(rows)
     successful = [row for row in rows if row["success"]]
-    summary = {"policy": args.policy, "known_future": False, "checkpoint": str(args.checkpoint.resolve()),
+    summary = {"policy": "dqn", "known_future": False, "checkpoint": str(args.checkpoint.resolve()),
                "known_car_goal": False, "observation_delay": config.observation_delay,
-               "prediction_steps": (list(range(controller.horizon + config.sensing_steps))
-                                    if controller is not None else
-                                    list(agent.config.prediction_steps) if agent.motion_predictor is not None else []),
+               "prediction_steps": list(agent.config.prediction_steps) if agent.motion_predictor is not None else [],
                "observation_features": list(agent.config.observation_features),
-               "planning_horizon": controller.horizon if controller is not None else None,
                "motion_prediction": agent.motion_predictor is not None, "episodes": len(rows),
                "seed_start": args.seed, "seed_end_inclusive": args.seed + args.episodes - 1,
                "success_rate": rate("success"), "sensing_completion_rate": rate("sensing_complete"),

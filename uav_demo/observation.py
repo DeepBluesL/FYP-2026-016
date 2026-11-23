@@ -37,13 +37,12 @@ def observation_features(observation, config):
     }
 
 
-# 各特征的数值维度；rule_action 为外推规则所选动作的 17 维 one-hot，contact_probability 为 17 个动作各自的
-# 接触概率（由 DQNAgent 用网格推演填入，见 contact_prior.py），两者都不在默认特征中。
+# 各特征的数值维度；rule_action 为外推规则所选动作的 17 维 one-hot，不在默认特征中。
 FEATURE_SIZES = {
     "uav_pos": 2, "uav_speed": 1, "uav_goal": 2, "car_pos": 2, "time": 1,
     "sensing_progress": 1, "sensing_complete": 1, "sensing_failed": 1,
     "relative_car": 2, "relative_uav_goal": 2, "car_move_phase": 1,
-    "observation_age": 1, "has_observation": 1, "rule_action": 17, "contact_probability": 17,
+    "observation_age": 1, "has_observation": 1, "rule_action": 17,
 }
 
 
@@ -67,8 +66,6 @@ def encode_observation(observation, config, feature_names=DEFAULT_OBSERVATION_FE
     features = observation_features(observation, config)
     if "rule_action" in feature_names:
         features["rule_action"] = rule_action_onehot(observation, config)
-    if "contact_probability" in feature_names:
-        features["contact_probability"] = np.zeros(FEATURE_SIZES["contact_probability"], dtype=np.float32)  # 占位
     return np.concatenate([
         np.asarray(features[name], dtype=np.float32).reshape(-1)
         for name in feature_names

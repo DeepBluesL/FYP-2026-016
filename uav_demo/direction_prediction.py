@@ -1,9 +1,9 @@
 """方向概率 LSTM 预测器：逐步输出车辆下一步走北 / 东 / 南 / 西的概率，点预测取 k 步后最可能的格子（或 2 格内概率最大的格子）。
 
-与 MSE 训练的 SequencePredictor 不同，这里用交叉熵训练方向分类（越界方向屏蔽），不学平均位置，
-所以车直走时点预测不会落在车后面。往前推 k 步时按模型概率抽 samples 条路径，取第 k 步出现次数最多的格子
-（并列取下标最小）；point=disk 时改取「车落在半径 radius 内」的抽样比例最大的格子（见 grid_prediction.point_positions）。
-每次预测用固定的随机种子抽样，同样的历史总是给出同样的点。
+做法对应 CSSRNN（Wu et al., IJCAI 2017）在网格上的形式：RNN 读历史，对下一步的合法移动做屏蔽 softmax，用交叉熵训练；
+不学平均位置，所以车直走时点预测不会落在车后面。往前推 k 步时按模型概率逐步抽 samples 条路径（自回归抽样，Graves 2013），
+取第 k 步出现次数最多的格子（并列取下标最小）；point=disk 时改取「车落在半径 radius 内」的抽样比例最大的格子
+（半径内概率最大点，见 point_selection.py）。每次预测用固定的随机种子抽样，同样的历史总是给出同样的点。
 只建模随机路线、车辆每步移动一格（car_route=random，car_move_every=1）。
 """
 
@@ -13,9 +13,14 @@ import numpy as np
 import torch
 from torch import nn
 
-from .grid_prediction import POINT_RULES, point_positions
-from .sequence_prediction import prediction_device
+from .point_selection import POINT_RULES, point_positions
 from .vehicle import DIRECTIONS, generate_vehicle_trajectory
+
+
+def prediction_device(device="auto"):
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    return torch.device(device)
 
 
 def encode_positions(positions, grid_size: int) -> np.ndarray:

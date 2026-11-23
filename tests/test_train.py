@@ -39,29 +39,6 @@ class TrainingTests(unittest.TestCase):
                 TrainConfig(**changes)
         TrainConfig(episodes=1, prediction_seed=0, prediction_routes=10)
 
-    def test_sequence_training_entrypoint_uses_configuration_and_saves_metrics(self):
-        import json
-        import torch
-        from evaluate import check_test_seeds
-        torch.set_num_threads(1)
-        env_config = EnvConfig(grid_size=5, max_steps=8, uav_goal=(4, 4))
-        config = TrainConfig(episodes=1, eval_episodes=1, prediction_routes=10,
-                             prediction_seed=50_000, prediction_split_seed=9,
-                             prediction_epochs=1, prediction_model_type="gru",
-                             prediction_learning_rate=0.002, prediction_batch_size=3,
-                             prediction_device="cpu", prediction_hidden_size=8,
-                             prediction_head_size=4, hidden_sizes=(8,))
-        with tempfile.TemporaryDirectory() as folder, redirect_stdout(StringIO()):
-            agent = train(env_config, config, folder)
-            metrics = json.loads((Path(folder) / "prediction_metrics.json").read_text())
-        self.assertEqual(metrics["model_type"], "gru")
-        self.assertEqual(metrics["learning_rate"], 0.002)
-        self.assertEqual(metrics["batch_size"], 3)
-        self.assertEqual(sorted(sum(metrics["seed_groups"].values(), [])), list(range(50_000, 50_010)))
-        with self.assertRaisesRegex(ValueError, "重叠"):
-            check_test_seeds(agent, 50_009, 1)
-        check_test_seeds(agent, 50_010, 1)
-
 
 if __name__ == "__main__":
     unittest.main()

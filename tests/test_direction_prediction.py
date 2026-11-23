@@ -17,7 +17,7 @@ from uav_demo.config import EnvConfig, TrainConfig
 from uav_demo.direction_prediction import (DirectionPredictor, encode_positions, legal_directions,
                                            masked_log_softmax, route_examples)
 from uav_demo.environment import GridWorldEnv
-from uav_demo.grid_prediction import disk_sum
+from uav_demo.point_selection import disk_sum
 from uav_demo.observation import encode_observation
 from uav_demo.prediction_data import split_route_seeds
 from uav_demo.vehicle import DIRECTIONS, generate_vehicle_trajectory

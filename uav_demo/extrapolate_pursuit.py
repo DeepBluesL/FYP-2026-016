@@ -1,7 +1,7 @@
 """外推贪心：按最近报告的车辆位移线性外推到下一步，再选最接近外推点的动作。
 
 只读取延迟观测（不访问真实车辆位置或未来路线），是延迟条件下比“追旧位置”更公平的基线。
-接口与 PredictivePlanner 一致：reset() / choose_action(observation, mask)，可直接交给 evaluate_episode。
+接口为 reset() / choose_action(observation, mask)，可直接交给 evaluate_episode。
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class ExtrapolatePursuit:
         state = observation
         finished = state["sensing_complete"] or state["sensing_failed"]
         if not finished and not state["has_observation"]:
-            return 0  # 首次报告前悬停，与 simple_pursuit 一致
+            return 0  # 首次报告前悬停
         if finished:
             target = state["uav_goal"]
         else:

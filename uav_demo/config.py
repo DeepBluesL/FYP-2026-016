@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import math
 
 ACTIVATION_NAMES = ("relu", "leaky_relu", "tanh", "silu")
+PREDICTION_MODEL_TYPES = ("linear", "direction_lstm", "goal_filter", "oracle")
 
 
 def validate_network_settings(hidden_sizes, activation, leaky_relu_slope) -> tuple[int, ...]:
@@ -162,53 +163,33 @@ class TrainConfig:
     prediction_routes: int = 1000  # 三组路线的总数，不受 DQN episodes 限制
     prediction_seed: int = 100_000
     prediction_split_seed: int = 42
-    prediction_model_type: str = "lstm"
-    prediction_tcn_blocks: int = 4
-    prediction_tcn_kernel_size: int = 3
-    prediction_var_lags: int = 4  # VAR 使用最近多少个报告时刻的位置
-    # 网格推演（prediction_model_type=grid）的转向概率：counted 从训练路线数出来；base 基础概率；
-    # goal 基础概率 + 真实目的地偏向（读真实目的地序列，仅诊断上限）。
-    prediction_grid_turns: str = "counted"
-    # 点预测的取法（只对输出分布的预测器 grid / direction_lstm / goal_filter 有效）：mode 最可能的格子；
-    # disk 车落在采集半径内概率最大的格子（采集看的是车是否在半径内）。
-    prediction_point: str = "mode"
+    # linear 线性预测（匀速外推）；direction_lstm 方向概率 LSTM；goal_filter 目的地推断；oracle 真实位置（仅诊断上限）。
+    prediction_model_type: str = "linear"
+    # 点预测的取法（只对输出分布的预测器 direction_lstm / goal_filter 有效，linear / oracle 直接给一个点）：
+    # mode 最可能的格子；disk 半径内概率最大点，即车落在采集半径内概率最大的格子（见 point_selection.py）。
+    prediction_point: str = "disk"
+    # 以下只用于 direction_lstm。
     prediction_learning_rate: float = 0.001
     prediction_batch_size: int = 32
     prediction_device: str = "auto"
-    prediction_hidden_size: int = 256
-    prediction_head_size: int = 128
-    prediction_num_layers: int = 1
-    prediction_epochs: int = 20
+    prediction_hidden_size: int = 128
+    prediction_head_size: int = 64
+    prediction_epochs: int = 40
 
     observation_features: tuple[str, ...] = DEFAULT_OBSERVATION_FEATURES
-    prediction_steps: tuple[int, ...] = (4, 8, 12)
+    prediction_steps: tuple[int, ...] = (1,)  # 相对当前时刻；1 为下一步，规则追的也是这一步
     # >0 时启用外推规则先验：Q 值上规则动作 0、其余动作 −rule_prior（log 概率形式），
-    # 被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价（参考残差 Q 学习）。
+    # 被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价。
+    # 这是残差 Q 学习（Li et al., NeurIPS 2023）的自制简化：用硬最大值代替论文里的软最大值（log-sum-exp）和按概率抽样。
     # 需在 observation_features 中加入 rule_action。
     rule_prior: float = 0.0
     # 规则追的下一步车位从哪来：linear 线性预测；predictor 用运动预测器；oracle 用真实车位（仅诊断上界）。
     rule_source: str = "linear"
-    # >0 时规则先验随训练线性减弱：在这么多环境步内从 rule_prior 降到 0（对照实验）；0 为一直不变。
-    rule_prior_decay_steps: int = 0
-    # >0 时启用接触先验 ω（见 contact_prior.py）：Q 值上加 ω × [log(p_a + ε) − max log(p + ε)]，p_a 为动作 a 的接触概率。
-    # 接触概率只作先验输入，不进网络；要让网络也看到，在 observation_features 中加入 contact_probability。
-    contact_prior: float = 0.0
-    # 接触概率所用网格推演的转向概率来源，取值同 prediction_grid_turns。
-    contact_grid_turns: str = "counted"
-    # dqn：前馈 Double DQN（DQNAgent）；drqn：端到端循环 Q 网络对照组（drqn.py），不用预测器和任何先验。
-    agent_type: str = "dqn"
-
-    @property
-    def uses_contact_model(self) -> bool:
-        return self.contact_prior > 0 or "contact_probability" in self.observation_features
 
     @property
     def needs_true_trajectory(self) -> bool:
-        """真实位置诊断（规则或预测器取 oracle，或网格推演读真实目的地）需要以 expose_truth=True 创建环境。"""
-        reads_truth = self.prediction_model_type == "oracle" or (
-            self.prediction_model_type == "grid" and self.prediction_grid_turns == "goal")
-        return (self.rule_source == "oracle" or (self.use_motion_prediction and reads_truth)
-                or (self.uses_contact_model and self.contact_grid_turns == "goal"))
+        """真实位置诊断（规则或预测器取 oracle）需要以 expose_truth=True 创建环境。"""
+        return self.rule_source == "oracle" or (self.use_motion_prediction and self.prediction_model_type == "oracle")
 
     def __post_init__(self) -> None:
         self.observation_features = tuple(self.observation_features)
@@ -225,7 +206,7 @@ class TrainConfig:
             "episodes", "batch_size", "replay_capacity", "train_every", "target_update_every",
             "epsilon_decay_steps", "torch_threads", "eval_every", "eval_episodes", "log_every",
             "prediction_routes", "prediction_epochs", "prediction_batch_size",
-            "prediction_hidden_size", "prediction_head_size", "prediction_num_layers",
+            "prediction_hidden_size", "prediction_head_size",
         )
         for name in positive_fields:
             value = getattr(self, name)
@@ -254,7 +235,9 @@ class TrainConfig:
             raise ValueError("prediction_device 只能取 cpu、cuda 或 auto")
         if not math.isfinite(self.prediction_learning_rate) or self.prediction_learning_rate <= 0:
             raise ValueError("prediction_learning_rate 必须为有限正数")
-        if self.use_motion_prediction or self.uses_contact_model:
+        if self.prediction_model_type not in PREDICTION_MODEL_TYPES:
+            raise ValueError(f"prediction_model_type 只能取 {PREDICTION_MODEL_TYPES}")
+        if self.use_motion_prediction:
             start, end = self.prediction_seed, self.prediction_seed + self.prediction_routes
             for name, other_start, other_end in (
                 ("DQN 训练", self.seed, self.seed + self.episodes),
@@ -270,18 +253,7 @@ class TrainConfig:
             raise ValueError("rule_source 只能取 linear、predictor 或 oracle")
         if self.rule_source == "predictor" and not self.use_motion_prediction:
             raise ValueError("rule_source=predictor 需要启用运动预测")
-        for name in ("prediction_grid_turns", "contact_grid_turns"):
-            if getattr(self, name) not in ("counted", "base", "goal"):
-                raise ValueError(f"{name} 只能取 counted、base 或 goal")
         if self.prediction_point not in ("mode", "disk"):
             raise ValueError("prediction_point 只能取 mode 或 disk")
-        if self.prediction_point == "disk" and self.prediction_model_type not in ("grid", "direction_lstm", "goal_filter"):
-            raise ValueError("prediction_point=disk 只适用于输出分布的预测器（grid、direction_lstm、goal_filter）")
-        if not isinstance(self.rule_prior_decay_steps, int) or self.rule_prior_decay_steps < 0:
-            raise ValueError("rule_prior_decay_steps 必须是非负整数")
-        if not math.isfinite(self.contact_prior) or self.contact_prior < 0:
-            raise ValueError("contact_prior 必须是非负有限数")
-        if self.agent_type not in ("dqn", "drqn"):
-            raise ValueError("agent_type 只能取 dqn 或 drqn")
         if self.device not in ("cpu", "cuda", "auto"):
             raise ValueError("device 只能取 cpu、cuda 或 auto")

@@ -1,6 +1,6 @@
 """目的地推断预测器：对车辆当前目的地做贝叶斯滤波，再按推断出的目的地往前抽样推演车位。
 
-思路同「逆规划」（Baker, Saxe & Tenenbaum 2009）：假定车辆按「方向惯性 + 朝目的地偏向」行驶，
+思路同「逆规划」（Baker, Saxe & Tenenbaum 2009）和目标驱动的轨迹预测（Ziebart et al. 2009）：假定车辆按「方向惯性 + 朝目的地偏向」行驶，
 从观测到的每一步移动反推目的地的后验，再用后验预测未来。模型的形式与 vehicle.py 的随机路线相同：
 - 每步在地图内的方向上按 log 转向权重（直行 / 右转 / 掉头 / 左转）+ 偏向 × 进度（靠近目的地 +1，远离 −1）取 softmax；
 - 目的地在离出发点（或上一个目的地）曼哈顿距离不小于 min_goal_distance 的格子里均匀选，到达后换新目的地。
@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from .grid_prediction import POINT_RULES, point_positions
+from .point_selection import POINT_RULES, point_positions
 from .vehicle import DIRECTIONS, generate_vehicle_trajectory
 
 

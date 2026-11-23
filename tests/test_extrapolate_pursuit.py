@@ -2,10 +2,11 @@
 
 import unittest
 
+import numpy as np
+
 from uav_demo.config import EnvConfig
-from uav_demo.environment import ACTION_NAMES, GridWorldEnv
+from uav_demo.environment import ACTION_NAMES, GridWorldEnv, preview_move
 from uav_demo.extrapolate_pursuit import ExtrapolatePursuit, predicted_car
-from uav_demo.simple_pursuit import choose_action as greedy_action
 
 
 def report(car_pos, car_velocity, time, age):
@@ -39,13 +40,19 @@ class ExtrapolatePursuitTests(unittest.TestCase):
         action = policy.choose_action(env._observation(), env.valid_action_mask())
         self.assertEqual(ACTION_NAMES[action], "east_2")
 
-    def test_finished_sensing_navigates_like_greedy(self):
+    def test_finished_sensing_flies_straight_to_uav_goal(self):
         env = GridWorldEnv(EnvConfig(observation_delay=5))
         env.reset(seed=42)
         env.sensing_complete = True
         observation, mask = env._observation(), env.valid_action_mask()
-        self.assertEqual(ExtrapolatePursuit(env.config).choose_action(observation, mask),
-                         greedy_action(observation, env.config, mask))
+        action = ExtrapolatePursuit(env.config).choose_action(observation, mask)
+        distances = {}
+        for candidate in np.flatnonzero(mask):
+            position, _, invalid = preview_move(observation["uav_pos"], observation["uav_speed"],
+                                                int(candidate), env.config.grid_size)
+            if not invalid:
+                distances[int(candidate)] = sum((a - b) ** 2 for a, b in zip(position, observation["uav_goal"]))
+        self.assertEqual(distances[action], min(distances.values()))
 
 
 if __name__ == "__main__":

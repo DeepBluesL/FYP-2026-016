@@ -10,16 +10,12 @@ import numpy as np
 
 from evaluate import evaluate_episode
 from uav_demo.agent import DQNAgent
-from uav_demo.config import ACTIVATION_NAMES, EnvConfig, TrainConfig
-from uav_demo.contact_prior import ContactModel
-from uav_demo.drqn import DRQNAgent
+from uav_demo.config import ACTIVATION_NAMES, PREDICTION_MODEL_TYPES, EnvConfig, TrainConfig
 from uav_demo.environment import GridWorldEnv
-from uav_demo.grid_prediction import GridPredictor
 from uav_demo.linear_prediction import LinearPredictor
 from uav_demo.observation import encode_observation
 from uav_demo.oracle_prediction import OraclePredictor
 from uav_demo.prediction_data import split_route_seeds
-from uav_demo.sequence_prediction import fit_sequence_predictor
 
 
 def epsilon_at(step: int, config: TrainConfig) -> float:
@@ -47,18 +43,37 @@ def evaluate(agent: DQNAgent, env_config: EnvConfig, config: TrainConfig) -> dic
     }
 
 
-def grid_predictor(turns: str, env_config: EnvConfig, config: TrainConfig, metrics_path: Path) -> GridPredictor:
-    """网格推演：base / goal 不需要拟合；counted 只在预测器训练路线上数转向概率，并保存指标。"""
-    if turns == "base":
-        return GridPredictor.base(env_config)
-    if turns == "goal":
-        return GridPredictor.with_goals(env_config)
-    groups = split_route_seeds(route_count=config.prediction_routes, start_seed=config.prediction_seed,
-                               split_seed=config.prediction_split_seed)
-    predictor, metrics = GridPredictor.fit(env_config, groups)
-    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    print(f"Grid model: turn probabilities={metrics['turn_probabilities']}, "
-          f"validation MSE={metrics['validation_mse']:.6f}", flush=True)
+def fit_predictor(env_config: EnvConfig, config: TrainConfig, output_dir: Path):
+    """按 prediction_model_type 建预测器；需要拟合的只用预测器训练路线，验证和最终测试路线都不进入拟合。"""
+    if config.prediction_model_type == "oracle":
+        return OraclePredictor()
+    if config.prediction_model_type == "linear":
+        return LinearPredictor()
+    groups = split_route_seeds(
+        route_count=config.prediction_routes,
+        start_seed=config.prediction_seed,
+        split_seed=config.prediction_split_seed,
+    )
+    if config.prediction_model_type == "goal_filter":
+        from uav_demo.goal_inference import GoalFilterPredictor
+        predictor, metrics = GoalFilterPredictor.fit(env_config, groups)
+        print(f"Goal filter: turn probabilities={metrics['turn_probabilities']}, "
+              f"goal bias={metrics['goal_bias']:.3f}, "
+              f"validation log-likelihood per move={metrics['validation_log_likelihood']:.4f}", flush=True)
+    else:
+        from uav_demo.direction_prediction import DirectionPredictor
+        print(f"Fitting {config.prediction_model_type} model on {len(groups['train'])} training routes...", flush=True)
+        predictor, metrics = DirectionPredictor.fit(
+            env_config, groups, epochs=config.prediction_epochs, seed=config.seed,
+            learning_rate=config.prediction_learning_rate, batch_size=config.prediction_batch_size,
+            device=config.prediction_device, hidden_size=config.prediction_hidden_size,
+            head_size=config.prediction_head_size,
+        )
+        print(f"Motion model: validation log-likelihood per move="
+              f"{metrics['best_validation_log_likelihood']:.4f}", flush=True)
+    (output_dir / "prediction_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    # 输出分布的预测器按 prediction_point 从分布里取点。
+    predictor.point, predictor.radius = config.prediction_point, env_config.sensing_radius
     return predictor
 
 
@@ -71,89 +86,11 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path) ->
         encoding="utf-8",
     )
     env = GridWorldEnv(env_config, expose_truth=config.needs_true_trajectory)
-    predictor = None
-    if config.use_motion_prediction and config.prediction_model_type == "oracle":
-        predictor = OraclePredictor()
-    elif config.use_motion_prediction and config.prediction_model_type == "linear":
-        predictor = LinearPredictor()
-    elif config.use_motion_prediction and config.prediction_model_type == "grid":
-        predictor = grid_predictor(config.prediction_grid_turns, env_config, config,
-                                   output_dir / "prediction_metrics.json")
-    elif config.use_motion_prediction and config.prediction_model_type == "goal_filter":
-        # 目的地推断：参数只从预测器训练路线估计。
-        from uav_demo.goal_inference import GoalFilterPredictor
-        predictor, prediction_metrics = GoalFilterPredictor.fit(env_config, split_route_seeds(
-            route_count=config.prediction_routes, start_seed=config.prediction_seed,
-            split_seed=config.prediction_split_seed))
-        (output_dir / "prediction_metrics.json").write_text(json.dumps(prediction_metrics, indent=2), encoding="utf-8")
-        print(f"Goal filter: turn probabilities={prediction_metrics['turn_probabilities']}, "
-              f"goal bias={prediction_metrics['goal_bias']:.3f}, "
-              f"validation log-likelihood per move={prediction_metrics['validation_log_likelihood']:.4f}", flush=True)
-    elif config.use_motion_prediction:
-        # 只使用训练种子生成监督样本；验证和最终测试路线都不能进入预测器拟合。
-
-        groups = split_route_seeds(
-            route_count=config.prediction_routes,
-            start_seed=config.prediction_seed,
-            split_seed=config.prediction_split_seed,
-        )
-
-        print(f"Fitting {config.prediction_model_type} model on {len(groups['train'])} training routes...", flush=True)
-        if config.prediction_model_type == "var":
-            from uav_demo.var_prediction import VARPredictor
-            predictor, prediction_metrics = VARPredictor.fit(
-                env_config, groups, lags=config.prediction_var_lags,
-            )
-            validation_mse = prediction_metrics["validation_mse"]
-        elif config.prediction_model_type == "direction_lstm":
-            from uav_demo.direction_prediction import DirectionPredictor
-            predictor, prediction_metrics = DirectionPredictor.fit(
-                env_config, groups, epochs=config.prediction_epochs, seed=config.seed,
-                learning_rate=config.prediction_learning_rate, batch_size=config.prediction_batch_size,
-                device=config.prediction_device, hidden_size=config.prediction_hidden_size,
-                head_size=config.prediction_head_size,
-            )
-            validation_mse = None
-        else:
-            predictor, prediction_metrics = fit_sequence_predictor(
-                env_config,
-                groups,
-                model_type=config.prediction_model_type,
-                learning_rate=config.prediction_learning_rate,
-                batch_size=config.prediction_batch_size,
-                device=config.prediction_device,
-                hidden_size=config.prediction_hidden_size,
-                head_size=config.prediction_head_size,
-                num_layers=config.prediction_num_layers,
-                tcn_blocks=config.prediction_tcn_blocks,
-                tcn_kernel_size=config.prediction_tcn_kernel_size,
-                epochs=config.prediction_epochs,
-                seed=config.seed,
-            )
-            validation_mse = prediction_metrics["best_validation_mse"]
-
-        (output_dir / "prediction_metrics.json").write_text(
-            json.dumps(prediction_metrics, indent=2), encoding="utf-8",
-        )
-        if validation_mse is None:
-            print(f"Motion model: validation log-likelihood per move="
-                  f"{prediction_metrics['best_validation_log_likelihood']:.4f}", flush=True)
-        else:
-            print(f"Motion model: validation MSE={validation_mse:.6f}",
-                  flush=True)
-    if predictor is not None and config.prediction_point != "mode":
-        predictor.point, predictor.radius = config.prediction_point, env_config.sensing_radius
-    contact_model = None
-    if config.uses_contact_model:
-        contact_model = ContactModel(grid_predictor(config.contact_grid_turns, env_config, config,
-                                                    output_dir / "contact_metrics.json"))
+    predictor = fit_predictor(env_config, config, output_dir) if config.use_motion_prediction else None
     sample, _ = env.reset(seed=config.seed)
     observation_size = encode_observation(sample, env_config, config.observation_features).size
-    if config.agent_type == "drqn":
-        agent = DRQNAgent(observation_size, env.action_count, config, env_config=env_config)
-    else:
-        agent = DQNAgent(observation_size, env.action_count, config,
-                         motion_predictor=predictor, env_config=env_config, contact_model=contact_model)
+    agent = DQNAgent(observation_size, env.action_count, config,
+                     motion_predictor=predictor, env_config=env_config)
     best_score = (-1.0, -1.0, -float("inf"), -float("inf"))
     training_columns = [
         "episode", "seed", "steps", "reward", "success", "sensing_complete",
@@ -277,18 +214,10 @@ def main():
     parser.add_argument("--prediction-batch-size", type=int, default=defaults.prediction_batch_size)
     parser.add_argument("--prediction-hidden-size", type=int, default=defaults.prediction_hidden_size)
     parser.add_argument("--prediction-head-size", type=int, default=defaults.prediction_head_size)
-    parser.add_argument("--prediction-num-layers", type=int, default=defaults.prediction_num_layers)
-    parser.add_argument("--prediction-var-lags", type=int, default=defaults.prediction_var_lags,
-                        help="VAR 使用的历史位置数量，默认 4")
-    parser.add_argument("--prediction-grid-turns", choices=("counted", "base", "goal"),
-                        default=defaults.prediction_grid_turns,
-                        help="网格推演的转向概率：counted 从训练路线数出来；base 基础概率；goal 加真实目的地偏向（仅诊断上限）")
     parser.add_argument("--prediction-point", choices=("mode", "disk"), default=defaults.prediction_point,
-                        help="grid / direction_lstm / goal_filter 的点预测取法：mode 最可能的格子；disk 车落在采集半径内概率最大的格子")
-    parser.add_argument("--prediction-tcn-blocks", type=int, default=defaults.prediction_tcn_blocks)
-    parser.add_argument("--prediction-tcn-kernel-size", type=int, default=defaults.prediction_tcn_kernel_size)
-    parser.add_argument("--prediction-model-type", default=defaults.prediction_model_type,
-                        help="lstm/gru/rnn/tcn/var/linear/grid/oracle；direction_lstm 为方向概率 LSTM；goal_filter 为目的地贝叶斯推断")
+                        help="direction_lstm / goal_filter 的点预测取法：mode 最可能的格子；disk 半径内概率最大点（车落在采集半径内概率最大的格子）")
+    parser.add_argument("--prediction-model-type", choices=PREDICTION_MODEL_TYPES, default=defaults.prediction_model_type,
+                        help="linear 线性预测；direction_lstm 方向概率 LSTM；goal_filter 目的地推断；oracle 真实位置（仅诊断上限）")
     parser.add_argument("--prediction-device", choices=("auto", "cuda", "cpu"), default=defaults.prediction_device)
     parser.add_argument("--epsilon-decay-steps", type=int, default=defaults.epsilon_decay_steps)
     parser.add_argument(
@@ -302,14 +231,6 @@ def main():
                         help=">0 时启用外推规则先验：偏离规则的动作在 Q 值上扣该分数；需在 --observation-features 中加入 rule_action")
     parser.add_argument("--rule-source", choices=("linear", "predictor", "oracle"), default=defaults.rule_source,
                         help="规则追的下一步车位：linear 线性预测；predictor 运动预测器；oracle 真实车位（仅诊断上限）")
-    parser.add_argument("--agent", choices=("dqn", "drqn"), default=defaults.agent_type,
-                        help="drqn：端到端循环 Q 网络对照组，需配合 --no-motion-prediction 且不用先验")
-    parser.add_argument("--rule-prior-decay-steps", type=int, default=defaults.rule_prior_decay_steps,
-                        help=">0 时规则先验在这么多环境步内线性降到 0（对照实验）")
-    parser.add_argument("--contact-prior", type=float, default=defaults.contact_prior,
-                        help="接触先验 ω：Q 值上加 ω × log 接触概率（最好的动作为 0）；0 为不启用")
-    parser.add_argument("--contact-grid-turns", choices=("counted", "base", "goal"), default=defaults.contact_grid_turns,
-                        help="接触概率所用网格推演的转向概率来源")
     parser.add_argument("--auto-return", action="store_true", help="采集结束后自动沿最短路径返回终点")
     parser.add_argument("--car-route", choices=("fixed", "random"), default=EnvConfig().car_route,
                         help="fixed：固定起终点；random：每局随机起点和目的地，到达后换新目的地")
@@ -335,18 +256,9 @@ def main():
         prediction_batch_size=args.prediction_batch_size,
         prediction_hidden_size=args.prediction_hidden_size,
         prediction_head_size=args.prediction_head_size,
-        prediction_num_layers=args.prediction_num_layers,
-        prediction_var_lags=args.prediction_var_lags,
-        prediction_grid_turns=args.prediction_grid_turns,
         prediction_point=args.prediction_point,
-        prediction_tcn_blocks=args.prediction_tcn_blocks,
-        prediction_tcn_kernel_size=args.prediction_tcn_kernel_size,
         prediction_model_type=args.prediction_model_type,
         rule_source=args.rule_source,
-        rule_prior_decay_steps=args.rule_prior_decay_steps,
-        agent_type=args.agent,
-        contact_prior=args.contact_prior,
-        contact_grid_turns=args.contact_grid_turns,
         prediction_device=args.prediction_device,
         epsilon_decay_steps=args.epsilon_decay_steps,
         prediction_steps=tuple(args.prediction_steps),

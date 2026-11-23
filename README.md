@@ -2,74 +2,43 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-位置延迟实验：[uav_delay/README.md](uav_delay/README.md)。第 t 步只收到第 t−d 步的车辆位置（首次报告在第 d 步到达）；
-比较线性外推规则与“规则 + PPO 修正”（PyTorch PPO），与 uav_demo 相互独立。
+A UAV receives the car's position with a delay of d steps. It must stay within 2 cells of the car for 5 consecutive steps, then fly to its goal. The car follows a random route with hidden destinations. The method is developed on a 50×50 grid first; the final scenario will be a road network.
 
-A GridWorld research project combining vehicle motion prediction with Double DQN for UAV tracking, sensing, and navigation. Current implementation: November 9, 2026.
+## Method
 
-## Current behavior
+At each step a predictor forecasts the car's next position from the delayed reports. The rule moves one step toward that point. Double DQN (van Hasselt et al., AAAI 2016) sees the rule's action and the predicted point. Actions that differ from the rule lose `b` (`--rule-prior`). This is our own simplified form of residual Q-learning (Li et al., NeurIPS 2023): it uses a hard max instead of a soft max.
 
-- A 50×50 obstacle-free grid by default, with 17 UAV actions: hover and eight directions at two step sizes.
-- Fixed or randomly generated vehicle routes, delayed position reports, and consecutive or cumulative sensing.
-- Vehicle observations contain received history as `car_history=((measurement_time, (x, y)), …)`. No explicit vehicle displacement is passed to the policy. Before the first report, history is empty and `has_observation=False`.
-- Default DQN observations have 18 dimensions; three predicted positions add six features. UAV state and sensing progress remain available.
-- RNN, LSTM, and GRU predictors share a single implementation. Default architecture: input `(x,y,time)` → one 256-unit recurrent layer → Linear(256,128) → ReLU → Linear(128,2).
-- The original MLP, greedy pursuit, motion extrapolation, predictive planning, and Oracle heuristic remain in the codebase. MLP and extrapolation infer motion from received history.
+| `--prediction-model-type` | Method | Reference |
+|---|---|---|
+| `linear` (default) | Constant-velocity extrapolation | Schöller et al., RA-L 2020 |
+| `direction_lstm` | LSTM classifier of the next move; multi-step forecast by sampling step by step | Wu et al., IJCAI 2017; Graves 2013 |
+| `goal_filter` | Bayesian inference of the car's destination | Baker et al. 2009; Ziebart et al. 2009 |
+| `oracle` | True future position, diagnostic upper bound only | — |
 
-## Route data and training
+For `direction_lstm` and `goal_filter`, `--prediction-point disk` takes the cell where the car is most likely to be within the sensing radius. This matches the MR point of HOME (Gilles et al., ITSC 2021) with one point.
 
-The predictor uses 1,000 route seeds by default (`100000..100999`), shuffled into 800 training, 100 validation, and 100 test seeds before route generation. Each sample is a complete route, including stationary frames; there are no sliding windows. Routes are regenerated on demand, without storing all trajectories.
-
-Training uses batches of 32 complete routes, retains the final partial batch, and shuffles training routes. At each timestep a unidirectional network predicts the next position. Validation selects the best checkpoint using normalized one-step position MSE. The predictor test group is reserved and is not automatically evaluated by the training entrypoint. Multi-step rollout accuracy and downstream task performance require separate evaluation.
-
-The total predictor route count is independent of DQN episode count. Its seed range must not overlap DQN training/validation or final system evaluation routes. `config.json` records configuration; `prediction_metrics.json` records actual seed groups, training settings, and validation MSE.
-
-## Install and run
-
-Install a PyTorch build appropriate for the target machine, then install project dependencies:
+## Run
 
 ```powershell
 python -m pip install -r requirements.txt
-python train.py --prediction-model-type lstm --prediction-learning-rate 0.001 --prediction-batch-size 32 --prediction-device auto --observation-delay 3 --output-dir outputs/lstm
-python evaluate.py --checkpoint outputs/lstm/best_model.pt --policy dqn --episodes 100 --output-dir outputs/test_lstm
-python demo.py --checkpoint outputs/lstm/best_model.pt --policy dqn --output-dir outputs/demo_lstm
+python train.py --car-route random --auto-return --reward-v2 --movement-penalty 0 --observation-delay 8 --prediction-model-type direction_lstm --rule-source predictor --rule-prior 0.1 --observation-features uav_pos uav_speed uav_goal car_pos time sensing_progress sensing_complete sensing_failed relative_car relative_uav_goal car_move_phase observation_age has_observation rule_action --output-dir outputs/example
+python evaluate.py --checkpoint outputs/example/best_model.pt --episodes 200 --output-dir outputs/example_test
+python demo.py --checkpoint outputs/example/best_model.pt --output-dir outputs/example_demo
+python -m pytest -q
 ```
 
-Change `--prediction-model-type` to `rnn` or `gru` for comparisons. All predictor options are independent of DQN settings:
-
-| Option | Default | Meaning |
-|---|---|---|
-| `--prediction-routes` | 1000 | Total routes across the three groups |
-| `--prediction-seed` | 100000 | First route seed |
-| `--prediction-split-seed` | 42 | Seed controlling group assignment |
-| `--prediction-learning-rate` | 0.001 | Adam learning rate |
-| `--prediction-batch-size` | 32 | Complete routes per batch |
-| `--prediction-device` | auto | Prefer CUDA, otherwise CPU; explicit cpu/cuda also supported |
-| `--prediction-hidden-size` | 256 | Recurrent width |
-| `--prediction-head-size` | 128 | Output-head hidden width |
-| `--prediction-num-layers` | 1 | Recurrent depth |
-| `--prediction-epochs` | 20 | Predictor training epochs |
-| `--prediction-steps` | 4 8 12 | Forecast offsets from the current decision time |
-
-DQN device selection remains separate (`--device`, default CPU). `--no-motion-prediction` disables forecast features; `--policy predictive` selects predictive planning in evaluation/demo. Forecasting adds report age to requested horizons exactly once. Outputs are stored under `outputs/`.
+`experiments/`: `run_queue.sh` trains a job list (results go to `outputs/diag_v9/`). `analyze_groups.py` compares groups of seeds. `offline_predictors.py` checks predictor hit rates and calibration. `rule_only.py` runs the rule without learning.
 
 ## Code map
 
 | File | Responsibility |
 |---|---|
-| `uav_demo/prediction_data.py` | Seed splits and complete-route generation |
-| `uav_demo/sequence_prediction.py` | Networks, route batching, training, rollout, serialization |
-| `uav_demo/prediction.py` | Original MLP and shared forecast adapter |
-| `uav_demo/environment.py`, `observation.py` | Delayed observations and feature encoding |
-| `uav_demo/config.py`, `train.py` | Configuration, seed checks, training entrypoint |
-| `uav_demo/agent.py` | Double DQN and predictor checkpoint loading |
-| `evaluate.py`, `demo.py` | Evaluation and visualization |
-| `deploy/policy.py` | Simulator-facing policy and report builder |
+| `uav_demo/environment.py`, `vehicle.py`, `observation.py` | Grid world, car routes, delayed reports, features |
+| `uav_demo/prediction.py` and `*_prediction.py`, `goal_inference.py` | Predictor interface and predictors |
+| `uav_demo/point_selection.py` | Point from a distribution |
+| `uav_demo/extrapolate_pursuit.py` | Rule: one greedy step toward the target |
+| `uav_demo/agent.py`, `model.py`, `config.py`, `train.py` | Double DQN with rule prior, configuration, training |
+| `evaluate.py`, `demo.py`, `uav_demo/visualization.py`, `planner.py` | Evaluation and replays |
+| `deploy/` | Simulator-facing policy |
 
-## Compatibility and validation
-
-Checkpoint format is now **v9**. Earlier checkpoints require retraining; bundled legacy deployment weights and reference results are not current-model benchmarks. No new long training run or RNN/LSTM/GRU performance comparison has been completed. The local environment has CPU-only PyTorch, so actual CUDA execution remains unverified.
-
-Tests can be run explicitly with `python -m unittest discover -s tests -q`. No tests were run as part of this documentation update.
-
-Historical experiment details: [local experiment notes](README_LOCAL.md). The November 4 fixed-route results predate the current sequence models and should not be attributed to them. [Deployment guide](deploy/README.md) · [Original project plan and team assignments (Chinese)](PROJECT_PLAN.md).
+Code removed in the 2026-11 cleanup (MSE predictors, predictive planner, DRQN, `uav_delay/` and others) is at commit `5043846`. See also the [deployment guide](deploy/README.md), the [historical notes](README_LOCAL.md) and the [original plan](PROJECT_PLAN.md).

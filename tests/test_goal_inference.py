@@ -9,14 +9,14 @@ from pathlib import Path
 
 import numpy as np
 
-from compare_predictors import report_history
+from uav_demo.prediction import report_history
 from train import train
 from uav_demo.agent import DQNAgent
 from uav_demo.config import EnvConfig, TrainConfig
 from uav_demo.goal_inference import GoalFilterPredictor
-from uav_demo.grid_prediction import GridPredictor, disk_sum
+from uav_demo.point_selection import disk_sum
 from uav_demo.prediction_data import split_route_seeds
-from uav_demo.vehicle import generate_vehicle_trajectory
+from uav_demo.vehicle import DIRECTIONS, generate_vehicle_trajectory
 
 RANDOM = EnvConfig(car_route="random")
 TRUE_LOG_WEIGHTS = np.log([0.65, 0.15, 0.05, 0.15])
@@ -24,6 +24,28 @@ TRUE_LOG_WEIGHTS = np.log([0.65, 0.15, 0.05, 0.15])
 
 def true_model(**options):
     return GoalFilterPredictor(TRUE_LOG_WEIGHTS, RANDOM.car_goal_bias, 20, **options)
+
+
+def exact_known_goal(position, heading: int, goal, steps: int) -> np.ndarray:
+    """目的地已知且途中不换时，按车辆生成器的规则精确推演 steps 步后的车位分布 [50, 50]。"""
+    goal = np.asarray(goal)
+    states = {(tuple(position), heading): 1.0}
+    for _ in range(steps):
+        moved = {}
+        for (cell, facing), probability in states.items():
+            options = np.asarray(cell) + DIRECTIONS
+            legal = np.flatnonzero(np.all((options >= 0) & (options < 50), axis=1))
+            progress = np.abs(np.asarray(cell) - goal).sum() - np.abs(options[legal] - goal).sum(axis=1)
+            logits = TRUE_LOG_WEIGHTS[(legal - facing) % 4] + RANDOM.car_goal_bias * progress
+            weights = np.exp(logits - logits.max())
+            for direction, weight in zip(legal, weights / weights.sum()):
+                key = (tuple(options[direction]), int(direction))
+                moved[key] = moved.get(key, 0.0) + probability * weight
+        states = moved
+    grid = np.zeros((50, 50))
+    for (cell, _), probability in states.items():
+        grid[cell] += probability
+    return grid
 
 
 class FitTests(unittest.TestCase):
@@ -81,7 +103,7 @@ class SamplingTests(unittest.TestCase):
         model.belief = lambda history, grid_size: (goal, 1)  # 目的地已知为 (40, 30)、朝东
         history = [(0, (19, 20)), (1, (20, 20))]
         samples = model.sample_positions(history, 50, (4,))[0]
-        exact = GridPredictor.with_goals(RANDOM).distributions(history, 50, (4,), goals=np.tile((40, 30), (10, 1)))[0]
+        exact = exact_known_goal((20, 20), 1, (40, 30), 4)
         sampled = np.zeros((50, 50))
         np.add.at(sampled, (samples[:, 0], samples[:, 1]), 1 / len(samples))
         self.assertLess(0.5 * np.abs(sampled - exact).sum(), 0.03)

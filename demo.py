@@ -19,7 +19,7 @@ def make_record(observation, info, action=None, reward=0.0):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="50x50 UAV / car：学习策略与独立 Oracle 对照")
-    parser.add_argument("--policy", choices=("oracle", "dqn", "predictive"), default="dqn")
+    parser.add_argument("--policy", choices=("oracle", "dqn"), default="dqn")
     parser.add_argument("--seed", type=int, default=3_000_000)
     parser.add_argument("--checkpoint", type=Path, default=Path("outputs/current_prediction_20261022/wait_train/best_model.pt"))
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/demo"))
@@ -28,8 +28,7 @@ def main() -> None:
     parser.add_argument("--show", action="store_true", help="同时显示交互式动画窗口")
     args = parser.parse_args()
 
-    controller = None
-    if args.policy in ("dqn", "predictive"):
+    if args.policy == "dqn":
         from uav_demo.agent import DQNAgent
 
         try:
@@ -38,16 +37,11 @@ def main() -> None:
             parser.error(str(error))
         if args.sensing_mode and args.sensing_mode != config.sensing_mode:
             parser.error("DQN 演示使用模型保存的采集模式，请加载对应模式的模型")
-        if args.policy == "predictive":
-            from uav_demo.predictive_planner import PredictivePlanner
-            if agent.motion_predictor is None:
-                parser.error("预测拦截策略需要包含车辆运动预测器的 checkpoint")
-            controller = PredictivePlanner(agent.motion_predictor, config)
     else:
         config = EnvConfig(sensing_mode=args.sensing_mode or EnvConfig().sensing_mode)
         agent = OraclePlanner()
 
-    env = GridWorldEnv(config)
+    env = GridWorldEnv(config, expose_truth=args.policy == "dqn" and agent.config.needs_true_trajectory)
     observation, info = env.reset(seed=args.seed)
     records = [make_record(observation, info)]
     total_reward = 0.0
@@ -55,11 +49,6 @@ def main() -> None:
         predicted, prediction_steps = None, []
         if args.policy == "oracle":
             action = agent.choose_action(env)
-        elif controller is not None:
-            action = controller.choose_action(observation, env.valid_action_mask())
-            predicted = controller.last_predictions
-            if predicted is not None:
-                prediction_steps = list(range(len(predicted)))
         else:
             action = agent.choose_action(observation, epsilon=0.0, mask=env.valid_action_mask())
             predicted = agent.predict_car(observation)
@@ -79,9 +68,7 @@ def main() -> None:
         "observation_mode": "full_route_oracle" if args.policy == "oracle" else "delayed_vehicle",
         "observation_delay": config.observation_delay,
         "known_car_goal": args.policy == "oracle",
-        "prediction_steps": (list(range(controller.horizon + config.sensing_steps))
-                             if controller is not None else
-                             list(agent.config.prediction_steps)
+        "prediction_steps": (list(agent.config.prediction_steps)
                              if args.policy == "dqn" and agent.motion_predictor is not None else []),
         "observation_features": list(agent.config.observation_features) if args.policy != "oracle" else [],
         "learned_motion_prediction": args.policy != "oracle" and agent.motion_predictor is not None,

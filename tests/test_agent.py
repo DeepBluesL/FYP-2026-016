@@ -116,11 +116,11 @@ class DQNTests(unittest.TestCase):
             self.assertTrue(torch.equal(original_q, loaded.online(torch.from_numpy(loaded._features(observation)))))
 
     def test_prediction_features_and_policy_survive_checkpoint_roundtrip(self):
-        from uav_demo.prediction import MotionPredictor
+        from uav_demo.linear_prediction import LinearPredictor
 
         env = GridWorldEnv()
         observation, _ = env.reset(seed=789)
-        predictor = MotionPredictor()
+        predictor = LinearPredictor()
         config = self.config(prediction_steps=(0, 1, 4, 8))
         agent = DQNAgent(18, env.action_count, config,
                          motion_predictor=predictor, env_config=env.config)
@@ -274,11 +274,11 @@ class DQNTests(unittest.TestCase):
         np.testing.assert_array_equal(loaded._features(observation), agent._features(observation))
 
     def test_missing_report_keeps_features_fixed_size_and_skips_prediction(self):
-        from uav_demo.prediction import MotionPredictor
+        from uav_demo.linear_prediction import LinearPredictor
 
         env = GridWorldEnv(EnvConfig(observation_delay=3, uav_start=(3, 2)))
         observation, _ = env.reset(seed=42)
-        predictor = MotionPredictor()
+        predictor = LinearPredictor()
         agent = DQNAgent(18, env.action_count,
                          self.config(prediction_steps=(0, 1, 4, 8)),
                          motion_predictor=predictor, env_config=env.config)
