@@ -29,6 +29,17 @@ python -m pytest -q
 
 `experiments/`: `run_queue.sh` trains a job list (results go to `outputs/diag_v9/`). `analyze_groups.py` compares groups of seeds. `offline_predictors.py` checks predictor hit rates and calibration. `rule_only.py` runs the rule without learning.
 
+## Completed experiments
+
+| Date | By | Setting | Result |
+|---|---|---|---|
+| 10-22 | lhy | 50×50, car starts from a fixed corner, no delay, 1 training seed | 100 test routes: DQN and greedy pursuit both 100% success, 43.8 / 43.6 steps |
+| 11-04 | lhy | 15×15, fixed route, delay 3 | 100 test routes: DQN 95% success, predictive planner 59% |
+| 11-09 to 11-11 | lhy | RNN / LSTM / GRU, TCN and VAR predictors trained with MSE | Later compared on random routes: all worse than linear prediction; the direction LSTM was adapted from their LSTM and MLP direction classifier |
+| 11-05 to 11-24 | karnes | Random routes, delay 8 / 12, 10 seeds each, failure counted as 150 steps | Pure DQN 100.8 / 122.4 steps; rule + prior: linear 56.8 / 80.9, direction LSTM 53.7 / 72.0, goal filter 53.8 / 69.1 |
+
+Settings and commands for the first three rows: [README_LOCAL.md](README_LOCAL.md).
+
 ## Code map
 
 | File | Responsibility |
