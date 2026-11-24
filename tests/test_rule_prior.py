@@ -44,7 +44,7 @@ class RuleFeatureTests(unittest.TestCase):
 
     def test_rule_prior_requires_rule_feature(self):
         with self.assertRaises(ValueError):
-            TrainConfig(rule_prior=5.0)
+            DQNAgent(18, GridWorldEnv.action_count, TrainConfig(rule_prior=5.0), env_config=EnvConfig())
 
     def test_large_rule_prior_makes_untrained_agent_follow_rule(self):
         config = EnvConfig(observation_delay=2)

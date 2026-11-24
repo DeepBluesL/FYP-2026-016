@@ -12,10 +12,24 @@ from policy import ObservationBuilder, Policy  # noqa: E402
 from uav_demo.environment import GridWorldEnv
 from uav_demo.config import EnvConfig, TrainConfig
 from uav_demo.agent import DQNAgent
+from uav_demo.ppo import PPOAgent
 from uav_demo.observation import DEFAULT_OBSERVATION_FEATURES, encode_observation  # noqa: E402
 
 
 class DeployTests(unittest.TestCase):
+    def test_ppo_checkpoint_matches_environment_through_report_builder(self):
+        for auto_return in (False, True):
+            config = EnvConfig(grid_size=5, max_steps=8, uav_goal=(4, 4),
+                               observation_delay=2, auto_return=auto_return)
+            agent = PPOAgent(18, 17, TrainConfig(use_motion_prediction=False, hidden_sizes=(8,)),
+                             env_config=config)
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "ppo.pt"
+                agent.save(path, config)
+                policy = Policy(path, delay=2)
+                self.assertIsInstance(policy.agent, PPOAgent)
+                self.assertEqual(run_episode(policy, GridWorldEnv(config), 3_000_000)[2], 0)
+
     def make_policy(self, delay):
         # Interface tests use current-format weights, not the archived trained models.
         folder = tempfile.TemporaryDirectory()

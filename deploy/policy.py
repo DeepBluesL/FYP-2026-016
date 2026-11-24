@@ -1,4 +1,4 @@
-"""仿真平台调用接口：加载训练好的 DQN（外推规则先验 b=0.1 + 简化奖励），每步输入观测、输出动作编号。
+"""仿真平台调用接口：自动加载 DQN 或 PPO，每步输入观测、输出动作编号。
 
 用法：
     policy = Policy(delay=6)                 # 或 Policy("deploy/models/d6.pt")
@@ -14,11 +14,13 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from uav_demo.ppo import PPOAgent
 from uav_demo.agent import DQNAgent  # noqa: E402
 from uav_demo.environment import ACTION_NAMES, ACTIONS, preview_move  # noqa: E402
 from uav_demo.planner import minimum_travel_steps  # noqa: E402
@@ -38,7 +40,10 @@ class Policy:
             if delay is None:
                 raise ValueError("model_path 和 delay 至少给一个")
             model_path = MODELS / f"d{delay}.pt"
-        self.agent, self.config = DQNAgent.load(model_path)
+        metadata = torch.load(model_path, map_location="cpu", weights_only=True)
+        agent_type = {"ppo": PPOAgent, "dqn": DQNAgent}[metadata.get("algorithm", "dqn")]
+        del metadata
+        self.agent, self.config = agent_type.load(model_path)
         if delay is not None and delay != self.config.observation_delay:
             raise ValueError(f"模型按延迟 {self.config.observation_delay} 训练，与 delay={delay} 不一致")
 

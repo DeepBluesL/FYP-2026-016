@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from uav_demo.agent import DQNAgent
+from uav_demo.ppo import PPOAgent
 from uav_demo.environment import GridWorldEnv
 
 
@@ -14,7 +15,10 @@ def check_test_seeds(agent, seed: int, episodes: int) -> None:
     if seed < 0 or episodes < 1:
         raise ValueError("测试 seed 必须非负，episodes 必须为正整数")
     cfg = agent.config
-    ranges = [("DQN 训练", cfg.seed, cfg.seed + cfg.episodes),
+    metadata = getattr(agent, "run_metadata", None)
+    train_start = metadata["run_train_seed_start"] if metadata else cfg.seed
+    train_end = metadata["run_train_seed_end_exclusive"] if metadata else cfg.seed + cfg.episodes
+    ranges = [("策略训练", train_start, train_end),
               ("验证", cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)]
     if agent.motion_predictor is not None:
         ranges.append(("车辆预测器训练/验证/测试", cfg.prediction_seed,
@@ -22,6 +26,11 @@ def check_test_seeds(agent, seed: int, episodes: int) -> None:
     for name, start, end in ranges:
         if seed < end and seed + episodes > start:
             raise ValueError(f"测试种子与{name}区间 [{start}, {end}) 重叠")
+    if metadata:
+        if not metadata["run_complete"]:
+            raise ValueError("训练运行尚未完成，最终测试需要完整运行的数据范围")
+        if seed < metadata["test_seed_start"] or seed + episodes > metadata["test_seed_end_exclusive"]:
+            raise ValueError("测试范围必须位于训练前指定的固定测试集中")
 
 
 def evaluate_episode(agent, env, seed: int, controller=None) -> dict:
@@ -67,14 +76,20 @@ def evaluate_episode(agent, env, seed: int, controller=None) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="当前状态策略的独立测试，不使用 Oracle 控制动作。")
-    parser.add_argument("--policy", choices=("dqn", "predictive"), default="dqn")
+    parser.add_argument("--policy", choices=("dqn", "ppo", "predictive"), default="dqn")
     parser.add_argument("--checkpoint", type=Path, default=Path("outputs/current_prediction_20261022/wait_train/best_model.pt"))
-    parser.add_argument("--episodes", type=int, default=100)
-    parser.add_argument("--seed", type=int, default=3_000_000)
+    parser.add_argument("--episodes", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/current_prediction_20261022/wait_test"))
     args = parser.parse_args()
     try:
-        agent, config = DQNAgent.load(args.checkpoint)
+        agent_type = PPOAgent if args.policy == "ppo" else DQNAgent
+        agent, config = agent_type.load(args.checkpoint)
+        metadata = agent.run_metadata
+        if args.seed is None:
+            args.seed = metadata["test_seed_start"] if metadata else 3_000_000
+        if args.episodes is None:
+            args.episodes = metadata["test_seed_end_exclusive"] - args.seed if metadata else 100
         check_test_seeds(agent, args.seed, args.episodes)
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
@@ -89,6 +104,7 @@ def main() -> None:
     rate = lambda field: sum(bool(row[field]) for row in rows) / len(rows)
     successful = [row for row in rows if row["success"]]
     summary = {"policy": args.policy, "known_future": False, "checkpoint": str(args.checkpoint.resolve()),
+               "run_metadata": agent.run_metadata,
                "known_car_goal": False, "observation_delay": config.observation_delay,
                "prediction_steps": (list(range(controller.horizon + config.sensing_steps))
                                     if controller is not None else

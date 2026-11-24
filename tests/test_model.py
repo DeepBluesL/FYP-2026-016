@@ -45,7 +45,8 @@ class NetworkTests(unittest.TestCase):
                     torch.testing.assert_close(network(torch.ones(2)), torch.full((3,), -2.0))
 
     def test_network_config_validation_and_json_width_list(self):
-        self.assertEqual(TrainConfig(hidden_sizes=[32, 16]).hidden_sizes, (32, 16))
+        network = QNetwork(2, 3, hidden_sizes=[32, 16])
+        self.assertEqual([m.out_features for m in network.layers if isinstance(m, nn.Linear)], [32, 16, 3])
         cases = (
             {"hidden_sizes": ()}, {"hidden_sizes": (0,)}, {"hidden_sizes": (-1, 8)},
             {"hidden_sizes": (3.5,)}, {"hidden_sizes": (True,)}, {"hidden_sizes": 128},
@@ -55,8 +56,6 @@ class NetworkTests(unittest.TestCase):
         )
         for changes in cases:
             with self.subTest(changes=changes):
-                with self.assertRaises(ValueError):
-                    TrainConfig(**changes)
                 with self.assertRaises(ValueError):
                     QNetwork(2, 3, **changes)
 

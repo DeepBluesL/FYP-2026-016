@@ -19,7 +19,7 @@ def make_record(observation, info, action=None, reward=0.0):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="50x50 UAV / car：学习策略与独立 Oracle 对照")
-    parser.add_argument("--policy", choices=("oracle", "dqn", "predictive"), default="dqn")
+    parser.add_argument("--policy", choices=("oracle", "dqn", "ppo", "predictive"), default="dqn")
     parser.add_argument("--seed", type=int, default=3_000_000)
     parser.add_argument("--checkpoint", type=Path, default=Path("outputs/current_prediction_20261022/wait_train/best_model.pt"))
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/demo"))
@@ -29,15 +29,17 @@ def main() -> None:
     args = parser.parse_args()
 
     controller = None
-    if args.policy in ("dqn", "predictive"):
+    if args.policy in ("dqn", "ppo", "predictive"):
         from uav_demo.agent import DQNAgent
+        from uav_demo.ppo import PPOAgent
 
         try:
-            agent, config = DQNAgent.load(args.checkpoint, device="cpu")
+            agent_type = PPOAgent if args.policy == "ppo" else DQNAgent
+            agent, config = agent_type.load(args.checkpoint, device="cpu")
         except (ValueError, FileNotFoundError) as error:
             parser.error(str(error))
         if args.sensing_mode and args.sensing_mode != config.sensing_mode:
-            parser.error("DQN 演示使用模型保存的采集模式，请加载对应模式的模型")
+            parser.error("演示使用模型保存的采集模式，请加载对应模式的模型")
         if args.policy == "predictive":
             from uav_demo.predictive_planner import PredictivePlanner
             if agent.motion_predictor is None:
@@ -82,7 +84,7 @@ def main() -> None:
         "prediction_steps": (list(range(controller.horizon + config.sensing_steps))
                              if controller is not None else
                              list(agent.config.prediction_steps)
-                             if args.policy == "dqn" and agent.motion_predictor is not None else []),
+                             if args.policy in ("dqn", "ppo") and agent.motion_predictor is not None else []),
         "observation_features": list(agent.config.observation_features) if args.policy != "oracle" else [],
         "learned_motion_prediction": args.policy != "oracle" and agent.motion_predictor is not None,
         "seed": args.seed,

@@ -1,6 +1,6 @@
 """Double DQN：当前状态与学习预测特征、经验回放、目标网络。"""
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -58,20 +58,46 @@ class ReplayBuffer:
         return tuple(np.stack(values) for values in zip(*batch))
 
 
-class DQNAgent:
+def restore_predictor(saved_predictor, device):
+    predictor = None
+
+    if saved_predictor is not None:
+        if saved_predictor.get("model_type") == "tcn":
+            from .tcn_prediction import TCNPredictor
+            from .sequence_prediction import prediction_device
+            predictor = TCNPredictor(
+                hidden_size=saved_predictor["hidden_size"],
+                head_size=saved_predictor["head_size"],
+                num_blocks=saved_predictor["num_blocks"],
+                kernel_size=saved_predictor["kernel_size"],
+                max_steps=saved_predictor["max_steps"],
+            )
+            predictor.load_state_dict(saved_predictor["state_dict"])
+            predictor.to(prediction_device(device))
+            predictor.eval()
+        elif saved_predictor.get("model_type") == "var":
+            from .var_prediction import VARPredictor
+            predictor = VARPredictor(lags=saved_predictor["lags"])
+            predictor.coefficients = np.asarray(saved_predictor["coefficients"], dtype=np.float64)
+        elif saved_predictor.get("model_type") in ("rnn", "lstm", "gru"):
+            from .sequence_prediction import SequencePredictor
+            predictor = SequencePredictor.from_state(saved_predictor, device=device)
+        else:
+            from .prediction import MotionPredictor
+            predictor = MotionPredictor.from_state(saved_predictor)
+    return predictor
+
+
+class ObservationAgent:
     def __init__(self, observation_size: int, action_count: int, config: TrainConfig,
                  motion_predictor=None, *, env_config: EnvConfig):
         self.config = config
+        self.run_metadata = None
         self.observation_size = observation_size
         self.action_count = action_count
         self.motion_predictor = motion_predictor
         self.env_config = env_config
         self._prediction_cache = {}
-        # rule_prior > 0：选动作和下一步目标中加入外推规则先验（规则动作 0、其余 −rule_prior），
-        # 被拟合的 Q 不含先验，偏离规则的代价在训练中持续存在（参考残差 Q 学习）。
-        self._rule_slice = (feature_slice(config.observation_features, "rule_action")
-                            if config.rule_prior > 0 else None)
-
         self.network_input_size = observation_size + (
             2 * len(config.prediction_steps)
             if motion_predictor is not None else 0
@@ -82,21 +108,6 @@ class DQNAgent:
         torch.manual_seed(config.seed)
         if self.device.type == "cuda":
             torch.cuda.manual_seed_all(config.seed)
-        self.rng = np.random.default_rng(config.seed)
-        network_options = {
-            "hidden_sizes": config.hidden_sizes,
-            "activation": config.activation,
-            "leaky_relu_slope": config.leaky_relu_slope,
-        }
-        self.online = QNetwork(self.network_input_size, action_count, **network_options).to(self.device)
-        self.target = QNetwork(self.network_input_size, action_count, **network_options).to(self.device)
-        self.target.load_state_dict(self.online.state_dict())
-        self.target.eval()
-        self.optimizer = torch.optim.Adam(self.online.parameters(), lr=config.learning_rate)
-        self.loss_fn = nn.SmoothL1Loss()
-        self.replay = ReplayBuffer(config.replay_capacity, config.seed + 1)
-        self.environment_steps = 0
-        self.gradient_steps = 0
 
     def predict_car(self, observation) -> np.ndarray | None:
         if self.motion_predictor is None:
@@ -139,6 +150,39 @@ class DQNAgent:
                 [v / scale for v in observation["uav_pos"]], dtype=np.float32
             )
         return np.concatenate((features, relative.reshape(-1))).astype(np.float32)
+
+
+class DQNAgent(ObservationAgent):
+    def __init__(self, observation_size: int, action_count: int, config: TrainConfig,
+                 motion_predictor=None, *, env_config: EnvConfig):
+        config = replace(config, algorithm="dqn", activation=config.activation or "leaky_relu")
+        super().__init__(observation_size, action_count, config, motion_predictor, env_config=env_config)
+        # rule_prior > 0：选动作和下一步目标中加入外推规则先验（规则动作 0、其余 −rule_prior），
+        # 被拟合的 Q 不含先验，偏离规则的代价在训练中持续存在（参考残差 Q 学习）。
+        self._rule_slice = (feature_slice(config.observation_features, "rule_action")
+                            if config.rule_prior > 0 else None)
+
+        self.rng = np.random.default_rng(config.seed)
+        network_options = {
+            "hidden_sizes": config.hidden_sizes,
+            "activation": config.activation,
+            "leaky_relu_slope": config.leaky_relu_slope,
+        }
+        self.online = QNetwork(self.network_input_size, action_count, **network_options).to(self.device)
+        self.target = QNetwork(self.network_input_size, action_count, **network_options).to(self.device)
+        self.target.load_state_dict(self.online.state_dict())
+        self.target.eval()
+        self.optimizer = torch.optim.Adam(self.online.parameters(), lr=config.learning_rate)
+        self.loss_fn = nn.SmoothL1Loss()
+        self.replay = ReplayBuffer(config.replay_capacity, config.seed + 1)
+        self.environment_steps = 0
+        self.gradient_steps = 0
+
+    def parameter_counts(self):
+        online = sum(p.numel() for p in self.online.parameters())
+        target = sum(p.numel() for p in self.target.parameters())
+        return {"online": online, "target": target, "optimized_total": online,
+                "stored_total": online + target}
 
     def choose_action(self, observation, epsilon: float = 0.0, mask=None) -> int:
         if not 0.0 <= epsilon <= 1.0:
@@ -215,6 +259,7 @@ class DQNAgent:
         torch.save(
             {
                 "format_version": 9,
+                "parameter_counts": self.parameter_counts(),
                 "observation_mode": "delayed_vehicle",
                 "network_input_size": self.network_input_size,
                 "motion_predictor": self.motion_predictor.export_state() if self.motion_predictor is not None else None,
@@ -224,6 +269,7 @@ class DQNAgent:
                 "actions": [list(action) for action in ACTIONS],
                 "env_config": asdict(env_config),
                 "train_config": asdict(self.config),
+                "run_metadata": self.run_metadata,
                 "online_state_dict": self.online.state_dict(),
                 "target_state_dict": self.target.state_dict(),
                 "environment_steps": self.environment_steps,
@@ -279,33 +325,7 @@ class DQNAgent:
         ).size
         if checkpoint.get("observation_size") != expected_size:
             raise ValueError("模型观测维度与保存的特征配置不一致，请重新训练。")
-        predictor = None
-
-        saved_predictor = checkpoint.get("motion_predictor")
-        if saved_predictor is not None:
-            if saved_predictor.get("model_type") == "tcn":
-                from .tcn_prediction import TCNPredictor
-                from .sequence_prediction import prediction_device
-                predictor = TCNPredictor(
-                    hidden_size=saved_predictor["hidden_size"],
-                    head_size=saved_predictor["head_size"],
-                    num_blocks=saved_predictor["num_blocks"],
-                    kernel_size=saved_predictor["kernel_size"],
-                    max_steps=saved_predictor["max_steps"],
-                )
-                predictor.load_state_dict(saved_predictor["state_dict"])
-                predictor.to(prediction_device(train_config.prediction_device))
-                predictor.eval()
-            elif saved_predictor.get("model_type") == "var":
-                from .var_prediction import VARPredictor
-                predictor = VARPredictor(lags=saved_predictor["lags"])
-                predictor.coefficients = np.asarray(saved_predictor["coefficients"], dtype=np.float64)
-            elif saved_predictor.get("model_type") in ("rnn", "lstm", "gru"):
-                from .sequence_prediction import SequencePredictor
-                predictor = SequencePredictor.from_state(saved_predictor, device=train_config.prediction_device)
-            else:
-                from .prediction import MotionPredictor
-                predictor = MotionPredictor.from_state(saved_predictor)
+        predictor = restore_predictor(checkpoint.get("motion_predictor"), train_config.prediction_device)
         agent = cls(checkpoint["observation_size"], checkpoint["action_count"], train_config,
                     motion_predictor=predictor, env_config=env_config)
 
@@ -318,5 +338,6 @@ class DQNAgent:
             raise ValueError("模型权重与保存的网络结构不一致，请使用匹配的模型或重新训练。") from error
         agent.online.eval()
         agent.environment_steps = checkpoint["environment_steps"]
+        agent.run_metadata = checkpoint.get("run_metadata")
         agent.gradient_steps = checkpoint["gradient_steps"]
         return agent, env_config

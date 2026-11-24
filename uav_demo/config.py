@@ -9,7 +9,7 @@ ACTIVATION_NAMES = ("relu", "leaky_relu", "tanh", "silu")
 
 
 def validate_network_settings(hidden_sizes, activation, leaky_relu_slope) -> tuple[int, ...]:
-    """配置和独立构造 QNetwork 共用的结构检查，不需要导入 PyTorch。"""
+    """构造 QNetwork 时校验网络结构。"""
     if not isinstance(hidden_sizes, (tuple, list)) or not hidden_sizes:
         raise ValueError("hidden_sizes 必须是非空的正整数列表或元组")
     if any(isinstance(width, bool) or not isinstance(width, int) or width < 1 for width in hidden_sizes):
@@ -66,75 +66,14 @@ class EnvConfig:
     reward_v2: bool = False
     shaping_gamma: float = 0.99  # reward_v2 势函数塑形的折扣，应与 DQN 的 gamma 一致
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.grid_size, int) or self.grid_size < 5:
-            raise ValueError("grid_size 必须是 >= 5 的整数")
-
-        if not isinstance(self.max_steps, int) or self.max_steps < 1:
-            raise ValueError("max_steps 必须是正整数")
-
-        if not isinstance(self.car_move_every, int) or self.car_move_every < 1:
-            raise ValueError("car_move_every 必须是正整数")
-
-        if (isinstance(self.observation_delay, bool)
-                or not isinstance(self.observation_delay, int)
-                or self.observation_delay < 0
-        ):raise ValueError('Observation_delay have to be non-negative number')
-
-        if self.car_route not in ("fixed", "random"):
-            raise ValueError("car_route 只能取 fixed 或 random")
-
-        if self.max_steps // self.car_move_every < 2 * (self.grid_size - 1):
-            raise ValueError("时间上限太短：需保证车辆可从任意起点到达终点")
-        for name in ("uav_start", "uav_goal"):
-            position = tuple(getattr(self, name))  # JSON 的 list 也可还原
-            if len(position) != 2 or any(
-                    not isinstance(v, int) or not 0 <= v < self.grid_size for v in position
-            ):
-                raise ValueError(f"{name} 必须是地图内的整数坐标")
-            setattr(self, name, position)
-
-        if self.initial_speed not in (1, 2):
-            raise ValueError("initial_speed 只能取 1 或 2")
-        probabilities = (self.car_straight_prob, self.car_turn_prob, self.car_reverse_prob)
-
-        if any(not math.isfinite(p) or p <= 0 for p in probabilities):
-            raise ValueError("车辆各基础转向概率必须为有限正数")
-
-        if not math.isclose(self.car_straight_prob + 2 * self.car_turn_prob + self.car_reverse_prob, 1.0):
-            raise ValueError("直行 + 左转 + 右转 + 掉头的基础概率之和必须为 1")
-
-        if not math.isfinite(self.car_goal_bias) or not 0 <= self.car_goal_bias <= 20:
-            raise ValueError("car_goal_bias 必须在 [0, 20] 范围内")
-
-        if not math.isfinite(self.sensing_radius) or self.sensing_radius < 0:
-            raise ValueError("sensing_radius 必须是非负有限数")
-
-        if not isinstance(self.sensing_steps, int) or not 1 <= self.sensing_steps <= self.max_steps:
-            raise ValueError("sensing_steps 必须为 1 到 max_steps 之间的整数")
-
-        if self.sensing_mode not in ("consecutive", "cumulative"):
-            raise ValueError("sensing_mode 只能取 consecutive 或 cumulative")
-
-        if not math.isfinite(self.sensing_failure_penalty) or self.sensing_failure_penalty >= 0:
-            raise ValueError("sensing_failure_penalty 必须是有限负数")
-
-        if not 0 <= self.failed_return_progress_scale <= 1:
-            raise ValueError("failed_return_progress_scale 必须在 [0, 1] 内")
-
-        if not isinstance(self.progress_to_contact_boundary, bool):
-            raise ValueError("progress_to_contact_boundary 必须为布尔值")
-
-        if not math.isfinite(self.movement_penalty) or self.movement_penalty > 0:
-            raise ValueError("movement_penalty 必须是有限非正数")
-
-        if not 0 < self.shaping_gamma <= 1:
-            raise ValueError("shaping_gamma 必须在 (0, 1] 内")
-
 
 @dataclass
 class TrainConfig:
     episodes: int = 1500
+    total_steps: int | None = None
+    eval_every_steps: int | None = None  # 默认 rollout_steps 的 10 倍
+    test_seed: int = 3_000_000
+    test_episodes: int = 100
     batch_size: int = 64
     learning_rate: float = 0.0005
     gamma: float = 0.99
@@ -148,7 +87,7 @@ class TrainConfig:
     epsilon_decay_steps: int = 60_000
 
     hidden_sizes: tuple[int, ...] = (128, 128, 128)  # 每个元素定义一个隐藏层的宽度
-    activation: str = "leaky_relu"
+    activation: str | None = None  # 未指定时，PPO 使用 tanh，DQN 使用 leaky_relu
     leaky_relu_slope: float = 0.01
     seed: int = 42
     device: str = "cpu"
@@ -180,62 +119,13 @@ class TrainConfig:
     # 被拟合的 Q 不含先验，先验只进入动作选择和下一步目标，偏离规则持续有代价（参考残差 Q 学习）。
     # 需在 observation_features 中加入 rule_action。
     rule_prior: float = 0.0
-
-    def __post_init__(self) -> None:
-        self.observation_features = tuple(self.observation_features)
-        if not self.observation_features:
-            raise ValueError("observation_features 不能为空")
-        self.prediction_steps = tuple(self.prediction_steps)
-        if not self.prediction_steps or any(
-                isinstance(h, bool) or not isinstance(h, int) or h < 0
-                for h in self.prediction_steps
-        ):
-            raise ValueError("prediction_steps 必须是非空的非负整数序列")
-
-        positive_fields = (
-            "episodes", "batch_size", "replay_capacity", "train_every", "target_update_every",
-            "epsilon_decay_steps", "torch_threads", "eval_every", "eval_episodes", "log_every",
-            "prediction_routes", "prediction_epochs", "prediction_batch_size",
-            "prediction_hidden_size", "prediction_head_size", "prediction_num_layers",
-        )
-        for name in positive_fields:
-            value = getattr(self, name)
-            if not isinstance(value, int) or value < 1:
-                raise ValueError(f"{name} 必须是正整数")
-        self.hidden_sizes = validate_network_settings(
-            self.hidden_sizes, self.activation, self.leaky_relu_slope
-        )
-        if not isinstance(self.learning_starts, int) or self.learning_starts < 0:
-            raise ValueError("learning_starts 必须为非负整数")
-        if self.replay_capacity < self.batch_size:
-            raise ValueError("replay_capacity 不能小于 batch_size")
-        if not math.isfinite(self.learning_rate) or self.learning_rate <= 0:
-            raise ValueError("learning_rate 必须为有限正数")
-        if not 0 <= self.gamma <= 1:
-            raise ValueError("gamma 必须在 [0, 1] 范围内")
-        if not 0 <= self.epsilon_end <= self.epsilon_start <= 1:
-            raise ValueError("epsilon 必须满足 0 <= end <= start <= 1")
-        if self.seed < 0 or self.eval_seed < self.seed + self.episodes:
-            raise ValueError("训练种子必须非负，且 DQN 训练/验证种子区间不能重叠")
-        if self.prediction_routes < 10:
-            raise ValueError("prediction_routes 至少为 10，以划分训练/验证/测试三组")
-        if self.prediction_seed < 0 or self.prediction_split_seed < 0:
-            raise ValueError("预测器种子必须非负")
-        if self.prediction_device not in ("cpu", "cuda", "auto"):
-            raise ValueError("prediction_device 只能取 cpu、cuda 或 auto")
-        if not math.isfinite(self.prediction_learning_rate) or self.prediction_learning_rate <= 0:
-            raise ValueError("prediction_learning_rate 必须为有限正数")
-        if self.use_motion_prediction:
-            start, end = self.prediction_seed, self.prediction_seed + self.prediction_routes
-            for name, other_start, other_end in (
-                ("DQN 训练", self.seed, self.seed + self.episodes),
-                ("DQN 验证", self.eval_seed, self.eval_seed + self.eval_episodes),
-            ):
-                if start < other_end and end > other_start:
-                    raise ValueError(f"预测器种子区间与{name}重叠")
-        if not math.isfinite(self.rule_prior) or self.rule_prior < 0:
-            raise ValueError("rule_prior 必须是非负有限数")
-        if self.rule_prior > 0 and "rule_action" not in self.observation_features:
-            raise ValueError("rule_prior > 0 时 observation_features 必须包含 rule_action")
-        if self.device not in ("cpu", "cuda", "auto"):
-            raise ValueError("device 只能取 cpu、cuda 或 auto")
+    algorithm: str = "dqn"
+    rollout_steps: int = 1024
+    gae_lambda: float = 0.95
+    clip_ratio: float = 0.2
+    target_kl: float = 0.01
+    policy_lr: float = 3e-4
+    value_lr: float = 1e-3
+    train_pi_iters: int | None = None  # 未指定时为 80
+    train_v_iters: int | None = None  # 未指定时为 80
+    update_iters: int | None = None  # 兼容旧配置；独立字段优先

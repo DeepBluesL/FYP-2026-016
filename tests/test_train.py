@@ -36,8 +36,8 @@ class TrainingTests(unittest.TestCase):
         for changes in ({"prediction_seed": 42}, {"prediction_seed": 1_000_000},
                         {"prediction_seed": 41, "prediction_routes": 10}):
             with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, "重叠"):
-                TrainConfig(**changes)
-        TrainConfig(episodes=1, prediction_seed=0, prediction_routes=10)
+                with tempfile.TemporaryDirectory() as folder:
+                    train(EnvConfig(), TrainConfig(**changes), folder)
 
     def test_sequence_training_entrypoint_uses_configuration_and_saves_metrics(self):
         import json
@@ -60,7 +60,9 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(sorted(sum(metrics["seed_groups"].values(), [])), list(range(50_000, 50_010)))
         with self.assertRaisesRegex(ValueError, "重叠"):
             check_test_seeds(agent, 50_009, 1)
-        check_test_seeds(agent, 50_010, 1)
+        with self.assertRaisesRegex(ValueError, "固定测试"):
+            check_test_seeds(agent, 50_010, 1)
+        check_test_seeds(agent, 3_000_000, 1)
 
 
 if __name__ == "__main__":

@@ -19,9 +19,13 @@ def generate_vehicle_trajectory(
     只选择仍然能按时抵达终点的方向。到达后停留，非移动时刻也停留。
     这样每次 reset 都能得到一条完整、可复现且确实到终点的路线。
     """
+    if config.car_move_every < 1:
+        raise ValueError("车辆移动间隔至少为 1 步")
     if config.car_route == "random":
         return _random_route(config, rng)
     size = config.grid_size
+    if config.max_steps // config.car_move_every < 2 * (size - 1):
+        raise ValueError("固定路线的移动步数不足以到达终点")
 
     # x 向右、y 向上：起点固定右下角，50x50 时为 (49, 0)。
     position = np.asarray((size - 1, 0), dtype=np.int64)
@@ -33,7 +37,7 @@ def generate_vehicle_trajectory(
     heading = int(rng.integers(0, 4))
     trajectory = np.empty((config.max_steps + 1, 2), dtype=np.int64)
     trajectory[0] = position
-    # EnvConfig 已保证各方向权重为正；固定的 log 权重只计算一次。
+    # 固定的 log 权重只计算一次。
     log_turn_weights = np.log(np.asarray(
         (config.car_straight_prob, config.car_turn_prob,
          config.car_reverse_prob, config.car_turn_prob), dtype=np.float64
