@@ -8,7 +8,7 @@ from .model import build_mlp
 
 class PPOActorCritic(nn.Module):
     def __init__(self, observation_size, action_count,
-                 hidden_sizes=(128, 128, 128), activation="tanh", leaky_relu_slope=0.01):
+                 hidden_sizes=(64, 64, 64), activation="tanh", leaky_relu_slope=0.01):
         super().__init__()
         self.actor = build_mlp(observation_size, action_count, hidden_sizes, activation, leaky_relu_slope)
         self.critic = build_mlp(observation_size, 1, hidden_sizes, activation, leaky_relu_slope)

@@ -33,7 +33,7 @@ class QNetwork(nn.Module):
         self,
         observation_size: int,
         action_count: int,
-        hidden_sizes: tuple[int, ...] = (128, 128, 128),
+        hidden_sizes: tuple[int, ...] = (64, 64, 64),
         activation: str = "leaky_relu",
         leaky_relu_slope: float = 0.01,
     ):

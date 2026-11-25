@@ -18,7 +18,7 @@ class NetworkTests(unittest.TestCase):
         linear_layers = [layer for layer in network.layers if isinstance(layer, nn.Linear)]
         activations = [layer for layer in network.layers if isinstance(layer, nn.LeakyReLU)]
         self.assertEqual([(layer.in_features, layer.out_features) for layer in linear_layers],
-                         [(inputs, 128), (128, 128), (128, 128), (128, 17)])
+                         [(inputs, 64), (64, 64), (64, 64), (64, 17)])
         self.assertEqual(len(activations), 3)
         self.assertTrue(all(layer.negative_slope == 0.01 for layer in activations))
         self.assertEqual(tuple(network(torch.zeros(4, inputs)).shape), (4, 17))

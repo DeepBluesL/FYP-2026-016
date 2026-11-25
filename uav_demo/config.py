@@ -86,7 +86,7 @@ class TrainConfig:
     epsilon_end: float = 0.05
     epsilon_decay_steps: int = 60_000
 
-    hidden_sizes: tuple[int, ...] = (128, 128, 128)  # 每个元素定义一个隐藏层的宽度
+    hidden_sizes: tuple[int, ...] = (64, 64, 64)  # 每个元素定义一个隐藏层的宽度
     activation: str | None = None  # 未指定时，PPO 使用 tanh，DQN 使用 leaky_relu
     leaky_relu_slope: float = 0.01
     seed: int = 42

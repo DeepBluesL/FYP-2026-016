@@ -18,6 +18,8 @@ def policy_label(policy: str | None) -> str:
     """按保存的策略来源标注，避免将脚本或规划器回放误当成训练效果。"""
     if policy == "dqn":
         return "DQN (learned policy)"
+    if policy == "ppo":
+        return "PPO (learned policy)"
     if policy == "predictive":
         return "Learned motion model + intercept planner (not DQN)"
     if policy == "greedy_pursuit":
@@ -95,7 +97,7 @@ def render_episode(
     )
     if show_full_route:
         information_label = "Full vehicle route known  /  No obstacles  /  Eight-direction UAV"
-    elif policy in ("dqn", "predictive", "greedy_pursuit"):
+    elif policy in ("dqn", "ppo", "predictive", "greedy_pursuit"):
         information_label = f"Vehicle reports delayed {config.observation_delay} steps  /  Simulation replay"
         if "has_observation" in records[0]:
             information_label += "  /  Car goal hidden from policy"

@@ -1,0 +1,23 @@
+{
+  "started_at_utc": "2026-11-25T01:03:07.268493+00:00",
+  "target_duration_minutes": 90,
+  "workers": 12,
+  "hidden_sizes": [
+    64,
+    64,
+    64
+  ],
+  "status": "complete",
+  "previous_run": "128x3 experiment interrupted at user request; excluded",
+  "run_count": 30,
+  "configuration_count": 10,
+  "total_environment_steps": 6144000,
+  "omitted_control": "zero delay, runtime budget decision before test",
+  "training_and_test_finished_at_utc": "2026-11-25T02:30:53.375197+00:00",
+  "training_and_test_minutes": 87.76844506263733,
+  "report_verified_at_utc": "2026-11-25T02:32:31.450727+00:00",
+  "elapsed_minutes": 89.40303723333334,
+  "regression_tests_passed": 115,
+  "replay_count": 28,
+  "visual_checks": "All seven report plots inspected; replay routes and outcomes verified; HTML links and animations checked"
+}

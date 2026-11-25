@@ -1,0 +1,1778 @@
+{
+  "summary": {
+    "policy": "dqn",
+    "seed": 7000024,
+    "success": true,
+    "sensing_complete": true,
+    "sensing_failed": false,
+    "uav_reached_goal": true,
+    "steps": 28,
+    "sensing_complete_step": 8,
+    "travel_distance": 71.05382386916239,
+    "total_reward": 147.7571109948615,
+    "terminated": true,
+    "truncated": false
+  },
+  "config": {
+    "grid_size": 50,
+    "max_steps": 150,
+    "uav_start": [
+      0,
+      0
+    ],
+    "uav_goal": [
+      49,
+      49
+    ],
+    "initial_speed": 1,
+    "car_move_every": 1,
+    "observation_delay": 6,
+    "car_straight_prob": 0.65,
+    "car_turn_prob": 0.15,
+    "car_reverse_prob": 0.05,
+    "car_goal_bias": 1.0,
+    "car_route": "random",
+    "sensing_radius": 2.0,
+    "sensing_steps": 5,
+    "sensing_mode": "consecutive",
+    "step_penalty": -0.1,
+    "progress_reward": 0.2,
+    "progress_to_contact_boundary": true,
+    "movement_penalty": 0,
+    "contact_reward": 2.0,
+    "sensing_complete_reward": 50.0,
+    "sensing_failure_penalty": -100.0,
+    "failed_return_progress_scale": 0.1,
+    "success_reward": 100.0,
+    "invalid_move_penalty": -1.0,
+    "timeout_penalty": -10.0,
+    "auto_return": false,
+    "reward_v2": true,
+    "shaping_gamma": 0.99
+  },
+  "car_goal": [
+    13,
+    36
+  ],
+  "car_trajectory": [
+    [
+      6,
+      8
+    ],
+    [
+      7,
+      8
+    ],
+    [
+      7,
+      9
+    ],
+    [
+      8,
+      9
+    ],
+    [
+      9,
+      9
+    ],
+    [
+      10,
+      9
+    ],
+    [
+      11,
+      9
+    ],
+    [
+      12,
+      9
+    ],
+    [
+      13,
+      9
+    ],
+    [
+      13,
+      10
+    ],
+    [
+      13,
+      11
+    ],
+    [
+      13,
+      12
+    ],
+    [
+      13,
+      13
+    ],
+    [
+      14,
+      13
+    ],
+    [
+      14,
+      14
+    ],
+    [
+      14,
+      15
+    ],
+    [
+      14,
+      14
+    ],
+    [
+      13,
+      14
+    ],
+    [
+      13,
+      15
+    ],
+    [
+      13,
+      16
+    ],
+    [
+      13,
+      17
+    ],
+    [
+      13,
+      18
+    ],
+    [
+      13,
+      19
+    ],
+    [
+      13,
+      20
+    ],
+    [
+      13,
+      21
+    ],
+    [
+      13,
+      22
+    ],
+    [
+      13,
+      23
+    ],
+    [
+      13,
+      24
+    ],
+    [
+      13,
+      25
+    ],
+    [
+      13,
+      26
+    ],
+    [
+      13,
+      27
+    ],
+    [
+      13,
+      28
+    ],
+    [
+      13,
+      29
+    ],
+    [
+      13,
+      30
+    ],
+    [
+      13,
+      31
+    ],
+    [
+      13,
+      32
+    ],
+    [
+      13,
+      33
+    ],
+    [
+      13,
+      34
+    ],
+    [
+      13,
+      35
+    ],
+    [
+      13,
+      36
+    ],
+    [
+      14,
+      36
+    ],
+    [
+      15,
+      36
+    ],
+    [
+      16,
+      36
+    ],
+    [
+      17,
+      36
+    ],
+    [
+      18,
+      36
+    ],
+    [
+      19,
+      36
+    ],
+    [
+      20,
+      36
+    ],
+    [
+      20,
+      35
+    ],
+    [
+      20,
+      34
+    ],
+    [
+      21,
+      34
+    ],
+    [
+      21,
+      33
+    ],
+    [
+      22,
+      33
+    ],
+    [
+      23,
+      33
+    ],
+    [
+      24,
+      33
+    ],
+    [
+      25,
+      33
+    ],
+    [
+      25,
+      32
+    ],
+    [
+      25,
+      31
+    ],
+    [
+      25,
+      30
+    ],
+    [
+      25,
+      29
+    ],
+    [
+      25,
+      28
+    ],
+    [
+      26,
+      28
+    ],
+    [
+      27,
+      28
+    ],
+    [
+      28,
+      28
+    ],
+    [
+      29,
+      28
+    ],
+    [
+      29,
+      27
+    ],
+    [
+      30,
+      27
+    ],
+    [
+      31,
+      27
+    ],
+    [
+      32,
+      27
+    ],
+    [
+      32,
+      26
+    ],
+    [
+      32,
+      25
+    ],
+    [
+      32,
+      24
+    ],
+    [
+      32,
+      23
+    ],
+    [
+      32,
+      22
+    ],
+    [
+      32,
+      21
+    ],
+    [
+      32,
+      20
+    ],
+    [
+      33,
+      20
+    ],
+    [
+      34,
+      20
+    ],
+    [
+      35,
+      20
+    ],
+    [
+      36,
+      20
+    ],
+    [
+      36,
+      19
+    ],
+    [
+      36,
+      18
+    ],
+    [
+      36,
+      17
+    ],
+    [
+      36,
+      16
+    ],
+    [
+      36,
+      15
+    ],
+    [
+      36,
+      14
+    ],
+    [
+      36,
+      13
+    ],
+    [
+      36,
+      12
+    ],
+    [
+      36,
+      11
+    ],
+    [
+      36,
+      10
+    ],
+    [
+      36,
+      9
+    ],
+    [
+      36,
+      8
+    ],
+    [
+      37,
+      8
+    ],
+    [
+      38,
+      8
+    ],
+    [
+      39,
+      8
+    ],
+    [
+      38,
+      8
+    ],
+    [
+      38,
+      7
+    ],
+    [
+      39,
+      7
+    ],
+    [
+      39,
+      6
+    ],
+    [
+      39,
+      5
+    ],
+    [
+      39,
+      4
+    ],
+    [
+      39,
+      3
+    ],
+    [
+      39,
+      2
+    ],
+    [
+      39,
+      1
+    ],
+    [
+      38,
+      1
+    ],
+    [
+      37,
+      1
+    ],
+    [
+      36,
+      1
+    ],
+    [
+      35,
+      1
+    ],
+    [
+      34,
+      1
+    ],
+    [
+      33,
+      1
+    ],
+    [
+      32,
+      1
+    ],
+    [
+      31,
+      1
+    ],
+    [
+      31,
+      2
+    ],
+    [
+      31,
+      3
+    ],
+    [
+      31,
+      4
+    ],
+    [
+      31,
+      5
+    ],
+    [
+      30,
+      5
+    ],
+    [
+      29,
+      5
+    ],
+    [
+      29,
+      6
+    ],
+    [
+      29,
+      7
+    ],
+    [
+      28,
+      7
+    ],
+    [
+      27,
+      7
+    ],
+    [
+      26,
+      7
+    ],
+    [
+      25,
+      7
+    ],
+    [
+      24,
+      7
+    ],
+    [
+      23,
+      7
+    ],
+    [
+      23,
+      8
+    ],
+    [
+      23,
+      9
+    ],
+    [
+      23,
+      10
+    ],
+    [
+      23,
+      11
+    ],
+    [
+      23,
+      12
+    ],
+    [
+      23,
+      13
+    ],
+    [
+      23,
+      14
+    ],
+    [
+      23,
+      13
+    ],
+    [
+      22,
+      13
+    ],
+    [
+      21,
+      13
+    ],
+    [
+      20,
+      13
+    ],
+    [
+      19,
+      13
+    ],
+    [
+      18,
+      13
+    ],
+    [
+      17,
+      13
+    ],
+    [
+      16,
+      13
+    ],
+    [
+      16,
+      12
+    ],
+    [
+      16,
+      13
+    ],
+    [
+      15,
+      13
+    ],
+    [
+      14,
+      13
+    ],
+    [
+      14,
+      14
+    ],
+    [
+      14,
+      15
+    ],
+    [
+      14,
+      16
+    ],
+    [
+      15,
+      16
+    ],
+    [
+      16,
+      16
+    ],
+    [
+      16,
+      15
+    ],
+    [
+      17,
+      15
+    ]
+  ],
+  "records": [
+    {
+      "time": 0,
+      "success": false,
+      "sensing_complete": false,
+      "sensing_failed": false,
+      "sensing_finished": false,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "sensing",
+      "sensing_progress": 0,
+      "uav_pos": [
+        0,
+        0
+      ],
+      "uav_speed": 1,
+      "car_pos": [
+        6,
+        8
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        0
+      ],
+      "has_observation": false,
+      "observed_car_pos": null,
+      "observation_age": 0,
+      "travel_distance": 0.0,
+      "contact": false,
+      "invalid_move": false,
+      "action": null,
+      "reward": 0.0
+    },
+    {
+      "time": 1,
+      "success": false,
+      "sensing_complete": false,
+      "sensing_failed": false,
+      "sensing_finished": false,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "sensing",
+      "sensing_progress": 0,
+      "uav_pos": [
+        2,
+        2
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        7,
+        8
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        1,
+        0
+      ],
+      "has_observation": false,
+      "observed_car_pos": null,
+      "observation_age": 0,
+      "travel_distance": 2.8284271247461903,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.3495705641704826
+    },
+    {
+      "time": 2,
+      "success": false,
+      "sensing_complete": false,
+      "sensing_failed": false,
+      "sensing_finished": false,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "sensing",
+      "sensing_progress": 0,
+      "uav_pos": [
+        4,
+        4
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        7,
+        9
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": false,
+      "observed_car_pos": null,
+      "observation_age": 0,
+      "travel_distance": 5.656854249492381,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.30352146000196134
+    },
+    {
+      "time": 3,
+      "success": false,
+      "sensing_complete": false,
+      "sensing_failed": false,
+      "sensing_finished": false,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "sensing",
+      "sensing_progress": 0,
+      "uav_pos": [
+        6,
+        6
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        8,
+        9
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        1,
+        0
+      ],
+      "has_observation": false,
+      "observed_car_pos": null,
+      "observation_age": 0,
+      "travel_distance": 8.485281374238571,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.34829122642719035
+    },
+    {
+      "time": 4,
+      "success": false,
+      "sensing_complete": false,
+      "sensing_failed": false,
+      "sensing_finished": false,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "sensing",
+      "sensing_progress": 1,
+      "uav_pos": [
+        8,
+        8
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        9,
+        9
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        1,
+        0
+      ],
+      "has_observation": false,
+      "observed_car_pos": null,
+      "observation_age": 0,
+      "travel_distance": 11.313708498984761,
+      "contact": true,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 2.201110255092798
+    },
+    {
+      "time": 5,
+      "success": false,
+      "sensing_complete": false,
+      "sensing_failed": false,
+      "sensing_finished": false,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "sensing",
+      "sensing_progress": 2,
+      "uav_pos": [
+        9,
+        8
+      ],
+      "uav_speed": 1,
+      "car_pos": [
+        10,
+        9
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        1,
+        0
+      ],
+      "has_observation": false,
+      "observed_car_pos": null,
+      "observation_age": 0,
+      "travel_distance": 12.313708498984761,
+      "contact": true,
+      "invalid_move": false,
+      "action": 2,
+      "reward": 1.8599999999999999
+    },
+    {
+      "time": 6,
+      "success": false,
+      "sensing_complete": false,
+      "sensing_failed": false,
+      "sensing_finished": false,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "sensing",
+      "sensing_progress": 3,
+      "uav_pos": [
+        9,
+        9
+      ],
+      "uav_speed": 1,
+      "car_pos": [
+        11,
+        9
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        1,
+        0
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        6,
+        8
+      ],
+      "observation_age": 6,
+      "travel_distance": 13.313708498984761,
+      "contact": true,
+      "invalid_move": false,
+      "action": 1,
+      "reward": 1.8399999999999994
+    },
+    {
+      "time": 7,
+      "success": false,
+      "sensing_complete": false,
+      "sensing_failed": false,
+      "sensing_finished": false,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "sensing",
+      "sensing_progress": 4,
+      "uav_pos": [
+        10,
+        9
+      ],
+      "uav_speed": 1,
+      "car_pos": [
+        12,
+        9
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        1,
+        0
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        7,
+        8
+      ],
+      "observation_age": 6,
+      "travel_distance": 14.313708498984761,
+      "contact": true,
+      "invalid_move": false,
+      "action": 2,
+      "reward": 1.8199999999999998
+    },
+    {
+      "time": 8,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        11,
+        9
+      ],
+      "uav_speed": 1,
+      "car_pos": [
+        13,
+        9
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        1,
+        0
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        7,
+        9
+      ],
+      "observation_age": 6,
+      "travel_distance": 15.313708498984761,
+      "contact": true,
+      "invalid_move": false,
+      "action": 2,
+      "reward": 40.87585353448609
+    },
+    {
+      "time": 9,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        13,
+        11
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        10
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        8,
+        9
+      ],
+      "observation_age": 6,
+      "travel_distance": 18.14213562373095,
+      "contact": true,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.47017953529147605
+    },
+    {
+      "time": 10,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        15,
+        13
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        11
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        9,
+        9
+      ],
+      "observation_age": 6,
+      "travel_distance": 20.970562748477143,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.46450248735508226
+    },
+    {
+      "time": 11,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        17,
+        15
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        12
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        10,
+        9
+      ],
+      "observation_age": 6,
+      "travel_distance": 23.798989873223334,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.4588216388083862
+    },
+    {
+      "time": 12,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        19,
+        17
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        13
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        11,
+        9
+      ],
+      "observation_age": 6,
+      "travel_distance": 26.627416997969526,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.4531359929563231
+    },
+    {
+      "time": 13,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        21,
+        19
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        14,
+        13
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        1,
+        0
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        12,
+        9
+      ],
+      "observation_age": 6,
+      "travel_distance": 29.455844122715718,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.44744420642597993
+    },
+    {
+      "time": 14,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        23,
+        21
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        14,
+        14
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        9
+      ],
+      "observation_age": 6,
+      "travel_distance": 32.28427124746191,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.4417444343543281
+    },
+    {
+      "time": 15,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        25,
+        23
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        14,
+        15
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        10
+      ],
+      "observation_age": 6,
+      "travel_distance": 35.1126983722081,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.4360340886872841
+    },
+    {
+      "time": 16,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        27,
+        25
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        14,
+        14
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        -1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        11
+      ],
+      "observation_age": 6,
+      "travel_distance": 37.94112549695429,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.43030944912616864
+    },
+    {
+      "time": 17,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        29,
+        27
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        14
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        -1,
+        0
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        12
+      ],
+      "observation_age": 6,
+      "travel_distance": 40.769552621700484,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.42456501450175443
+    },
+    {
+      "time": 18,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        31,
+        29
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        15
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        13
+      ],
+      "observation_age": 6,
+      "travel_distance": 43.597979746446676,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.41879237628621235
+    },
+    {
+      "time": 19,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        33,
+        31
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        16
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        14,
+        13
+      ],
+      "observation_age": 6,
+      "travel_distance": 46.42640687119287,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.41297816562773504
+    },
+    {
+      "time": 20,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        35,
+        33
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        17
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        14,
+        14
+      ],
+      "observation_age": 6,
+      "travel_distance": 49.25483399593906,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.4071000896739966
+    },
+    {
+      "time": 21,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        37,
+        35
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        18
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        14,
+        15
+      ],
+      "observation_age": 6,
+      "travel_distance": 52.08326112068525,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.4011187200058771
+    },
+    {
+      "time": 22,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        39,
+        37
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        19
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        14,
+        14
+      ],
+      "observation_age": 6,
+      "travel_distance": 54.91168824543144,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.3949589112581201
+    },
+    {
+      "time": 23,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        41,
+        39
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        20
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        14
+      ],
+      "observation_age": 6,
+      "travel_distance": 57.740115370177634,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.3884626723392529
+    },
+    {
+      "time": 24,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        43,
+        41
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        21
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        15
+      ],
+      "observation_age": 6,
+      "travel_distance": 60.568542494923825,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.38124969497313954
+    },
+    {
+      "time": 25,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        45,
+        43
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        22
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        16
+      ],
+      "observation_age": 6,
+      "travel_distance": 63.39696961967002,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.37220169491625976
+    },
+    {
+      "time": 26,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        47,
+        45
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        23
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        17
+      ],
+      "observation_age": 6,
+      "travel_distance": 66.2253967444162,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.3567375910956777
+    },
+    {
+      "time": 27,
+      "success": false,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": false,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        49,
+        47
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        24
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        18
+      ],
+      "observation_age": 6,
+      "travel_distance": 69.05382386916239,
+      "contact": false,
+      "invalid_move": false,
+      "action": 13,
+      "reward": 0.2984271909999162
+    },
+    {
+      "time": 28,
+      "success": true,
+      "sensing_complete": true,
+      "sensing_failed": false,
+      "sensing_finished": true,
+      "uav_reached_goal": true,
+      "car_arrived": false,
+      "phase": "to_goal",
+      "sensing_progress": 5,
+      "uav_pos": [
+        49,
+        49
+      ],
+      "uav_speed": 2,
+      "car_pos": [
+        13,
+        25
+      ],
+      "car_goal": [
+        13,
+        36
+      ],
+      "car_velocity": [
+        0,
+        1
+      ],
+      "has_observation": true,
+      "observed_car_pos": [
+        13,
+        19
+      ],
+      "observation_age": 6,
+      "travel_distance": 71.05382386916239,
+      "contact": false,
+      "invalid_move": false,
+      "action": 9,
+      "reward": 90.30000000000001
+    }
+  ]
+}

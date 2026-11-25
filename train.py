@@ -344,7 +344,7 @@ def main():
     parser.add_argument("--log-every", type=int, default=defaults.log_every)
     parser.add_argument(
         "--hidden-sizes", type=int, nargs="+", default=defaults.hidden_sizes,
-        help="DQN 与 PPO 共用的隐藏层宽度，例如 128 128 128",
+        help="DQN 与 PPO 共用的隐藏层宽度，例如 64 64 64",
     )
     parser.add_argument("--activation", choices=ACTIVATION_NAMES, default=defaults.activation,
                         help="默认 PPO 使用 tanh，DQN 使用 leaky_relu")

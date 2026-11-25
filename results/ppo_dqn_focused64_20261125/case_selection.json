@@ -1,0 +1,282 @@
+[
+  {
+    "condition": 0,
+    "kind": "median_common_success",
+    "algorithm": "dqn",
+    "training_seed": 10042,
+    "test_seed": 7000105,
+    "success": true,
+    "steps": 55,
+    "replay": "replays\\case1_median_common_success_dqn"
+  },
+  {
+    "condition": 0,
+    "kind": "median_common_success",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000105,
+    "success": true,
+    "steps": 52,
+    "replay": "replays\\case1_median_common_success_ppo"
+  },
+  {
+    "condition": 0,
+    "kind": "largest_absolute_gap",
+    "algorithm": "dqn",
+    "training_seed": 10042,
+    "test_seed": 7000002,
+    "success": true,
+    "steps": 29,
+    "replay": "replays\\case1_largest_absolute_gap_dqn"
+  },
+  {
+    "condition": 0,
+    "kind": "largest_absolute_gap",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000002,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case1_largest_absolute_gap_ppo"
+  },
+  {
+    "condition": 0,
+    "kind": "common_failure",
+    "algorithm": "dqn",
+    "training_seed": 10042,
+    "test_seed": 7000079,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case1_common_failure_dqn"
+  },
+  {
+    "condition": 0,
+    "kind": "common_failure",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000079,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case1_common_failure_ppo"
+  },
+  {
+    "condition": 1,
+    "kind": "median_common_success",
+    "algorithm": "dqn",
+    "training_seed": 42,
+    "test_seed": 7000041,
+    "success": true,
+    "steps": 29,
+    "replay": "replays\\case2_median_common_success_dqn"
+  },
+  {
+    "condition": 1,
+    "kind": "median_common_success",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000041,
+    "success": true,
+    "steps": 73,
+    "replay": "replays\\case2_median_common_success_ppo"
+  },
+  {
+    "condition": 1,
+    "kind": "largest_absolute_gap",
+    "algorithm": "dqn",
+    "training_seed": 42,
+    "test_seed": 7000009,
+    "success": true,
+    "steps": 29,
+    "replay": "replays\\case2_largest_absolute_gap_dqn"
+  },
+  {
+    "condition": 1,
+    "kind": "largest_absolute_gap",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000009,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case2_largest_absolute_gap_ppo"
+  },
+  {
+    "condition": 1,
+    "kind": "common_failure",
+    "algorithm": "dqn",
+    "training_seed": 42,
+    "test_seed": 7000089,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case2_common_failure_dqn"
+  },
+  {
+    "condition": 1,
+    "kind": "common_failure",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000089,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case2_common_failure_ppo"
+  },
+  {
+    "condition": 2,
+    "kind": "median_common_success",
+    "algorithm": "dqn",
+    "training_seed": 10042,
+    "test_seed": 7000021,
+    "success": true,
+    "steps": 50,
+    "replay": "replays\\case3_median_common_success_dqn"
+  },
+  {
+    "condition": 2,
+    "kind": "median_common_success",
+    "algorithm": "ppo",
+    "training_seed": 10042,
+    "test_seed": 7000021,
+    "success": true,
+    "steps": 115,
+    "replay": "replays\\case3_median_common_success_ppo"
+  },
+  {
+    "condition": 2,
+    "kind": "largest_absolute_gap",
+    "algorithm": "dqn",
+    "training_seed": 10042,
+    "test_seed": 7000042,
+    "success": true,
+    "steps": 41,
+    "replay": "replays\\case3_largest_absolute_gap_dqn"
+  },
+  {
+    "condition": 2,
+    "kind": "largest_absolute_gap",
+    "algorithm": "ppo",
+    "training_seed": 10042,
+    "test_seed": 7000042,
+    "success": false,
+    "steps": 128,
+    "replay": "replays\\case3_largest_absolute_gap_ppo"
+  },
+  {
+    "condition": 2,
+    "kind": "common_failure",
+    "algorithm": "dqn",
+    "training_seed": 10042,
+    "test_seed": 7000023,
+    "success": false,
+    "steps": 131,
+    "replay": "replays\\case3_common_failure_dqn"
+  },
+  {
+    "condition": 2,
+    "kind": "common_failure",
+    "algorithm": "ppo",
+    "training_seed": 10042,
+    "test_seed": 7000023,
+    "success": false,
+    "steps": 128,
+    "replay": "replays\\case3_common_failure_ppo"
+  },
+  {
+    "condition": 3,
+    "kind": "median_common_success",
+    "algorithm": "dqn",
+    "training_seed": 42,
+    "test_seed": 7000098,
+    "success": true,
+    "steps": 62,
+    "replay": "replays\\case4_median_common_success_dqn"
+  },
+  {
+    "condition": 3,
+    "kind": "median_common_success",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000098,
+    "success": true,
+    "steps": 33,
+    "replay": "replays\\case4_median_common_success_ppo"
+  },
+  {
+    "condition": 3,
+    "kind": "largest_absolute_gap",
+    "algorithm": "dqn",
+    "training_seed": 42,
+    "test_seed": 7000002,
+    "success": true,
+    "steps": 29,
+    "replay": "replays\\case4_largest_absolute_gap_dqn"
+  },
+  {
+    "condition": 3,
+    "kind": "largest_absolute_gap",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000002,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case4_largest_absolute_gap_ppo"
+  },
+  {
+    "condition": 3,
+    "kind": "common_failure",
+    "algorithm": "dqn",
+    "training_seed": 42,
+    "test_seed": 7000090,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case4_common_failure_dqn"
+  },
+  {
+    "condition": 3,
+    "kind": "common_failure",
+    "algorithm": "ppo",
+    "training_seed": 42,
+    "test_seed": 7000090,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case4_common_failure_ppo"
+  },
+  {
+    "condition": 4,
+    "kind": "largest_absolute_gap",
+    "algorithm": "dqn",
+    "training_seed": 10042,
+    "test_seed": 7000024,
+    "success": true,
+    "steps": 28,
+    "replay": "replays\\case5_largest_absolute_gap_dqn"
+  },
+  {
+    "condition": 4,
+    "kind": "largest_absolute_gap",
+    "algorithm": "ppo",
+    "training_seed": 20042,
+    "test_seed": 7000024,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case5_largest_absolute_gap_ppo"
+  },
+  {
+    "condition": 4,
+    "kind": "common_failure",
+    "algorithm": "dqn",
+    "training_seed": 10042,
+    "test_seed": 7000110,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case5_common_failure_dqn"
+  },
+  {
+    "condition": 4,
+    "kind": "common_failure",
+    "algorithm": "ppo",
+    "training_seed": 20042,
+    "test_seed": 7000110,
+    "success": false,
+    "steps": 150,
+    "replay": "replays\\case5_common_failure_ppo"
+  }
+]

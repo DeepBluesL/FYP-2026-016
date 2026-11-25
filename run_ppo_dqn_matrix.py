@@ -90,6 +90,7 @@ def worker(root, index, steps):
                     reward_v2=True, movement_penalty=0)
     cfg = TrainConfig(
         algorithm=job["algorithm"], seed=job["seed"], total_steps=steps, device="cuda",
+        hidden_sizes=(128, 128, 128),  # Preserve the archived short-budget experiment's architecture.
         rollout_steps=1024, eval_every_steps=steps, eval_episodes=10,
         test_seed=6_000_000, test_episodes=30, use_motion_prediction=job["predictor"] != "none",
         prediction_model_type=job["predictor"], prediction_routes=100, prediction_epochs=2,
