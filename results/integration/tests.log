@@ -1,0 +1,47 @@
+Parameter counts: {'actor': 305, 'critic': 161, 'optimized_total': 466, 'stored_total': 466}
+validation: success=0.0%, sensing=0.0%, reward=-1.0
+env_steps=8/19 steps=8 reward=-107.7 success=False updates=2
+validation: success=0.0%, sensing=0.0%, reward=-1.0
+validation: success=0.0%, sensing=0.0%, reward=-1.0
+validation: success=0.0%, sensing=0.0%, reward=-1.0
+env_steps=19/19 steps=3 reward=1.3 success=False updates=8
+Saved model and logs to C:\Users\29958\AppData\Local\Temp\tmpt6xo4jse
+Parameter counts: {'online': 305, 'target': 305, 'optimized_total': 305, 'stored_total': 610}
+validation: success=0.0%, sensing=0.0%, reward=-1.0
+env_steps=8/19 steps=8 reward=-105.7 success=False updates=0
+validation: success=0.0%, sensing=0.0%, reward=-1.0
+validation: success=0.0%, sensing=0.0%, reward=-1.0
+validation: success=0.0%, sensing=0.0%, reward=-1.0
+env_steps=19/19 steps=3 reward=3.4 success=False updates=0
+Saved model and logs to C:\Users\29958\AppData\Local\Temp\tmpm056q__c
+Parameter counts: {'online': 305, 'target': 305, 'optimized_total': 305, 'stored_total': 610}
+env_steps=8/19 steps=8 reward=-105.7 success=False updates=7
+validation: success=0.0%, sensing=0.0%, reward=-110.8
+validation: success=0.0%, sensing=0.0%, reward=-110.8
+env_steps=19/19 steps=3 reward=3.4 success=False updates=18
+Saved model and logs to C:\Users\29958\AppData\Local\Temp\tmp82k5_f_j
+Parameter counts: {'actor': 305, 'critic': 161, 'optimized_total': 466, 'stored_total': 466}
+env_steps=8/19 steps=8 reward=-107.7 success=False updates=2
+validation: success=0.0%, sensing=0.0%, reward=-110.8
+validation: success=0.0%, sensing=0.0%, reward=-110.8
+env_steps=19/19 steps=3 reward=1.3 success=False updates=8
+Saved model and logs to C:\Users\29958\AppData\Local\Temp\tmpy143gs6p
+Parameter counts: {'actor': 1425, 'critic': 1153, 'optimized_total': 2578, 'stored_total': 2578}
+episode=1/2 steps=8 reward=-110.3 success=False updates=2
+episode=2/2 steps=8 reward=-108.1 success=False updates=8
+validation: success=0.0%, sensing=0.0%, reward=-108.8
+Saved model and logs to C:\Users\29958\AppData\Local\Temp\tmp991w1toa
+Parameter counts: {'online': 305, 'target': 305, 'optimized_total': 305, 'stored_total': 610}
+env_steps=8/19 steps=8 reward=-105.7 success=False updates=0
+validation: success=0.0%, sensing=0.0%, reward=-110.8
+env_steps=19/19 steps=3 reward=3.4 success=False updates=0
+Saved model and logs to C:\Users\29958\AppData\Local\Temp\tmpgp0oq_ba
+E:\Code\FYP-2026-016-integrate\tests\test_rule_prior.py:84: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\torch\csrc\autograd\generated\python_variable_methods.cpp:821.)
+  self.assertAlmostEqual(float(agent.online(features)[action]), 3.0, delta=0.05)
+----------------------------------------------------------------------
+Ran 147 tests in 7.077s
+
+OK
+epoch=1 train=0.427637 validation=0.328842
+epoch=1 train=0.427634 validation=0.328843

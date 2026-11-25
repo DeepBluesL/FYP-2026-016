@@ -1,0 +1,44 @@
+[
+  {
+    "case": "main PPO",
+    "checkpoint": "best_model.pt",
+    "frames": 5,
+    "feature_max_difference": 0.0,
+    "output_max_difference": 0.0
+  },
+  {
+    "case": "main DQN TCN",
+    "checkpoint": "best_model.pt",
+    "frames": 5,
+    "feature_max_difference": 0.0,
+    "output_max_difference": 0.0
+  },
+  {
+    "case": "spec DQN linear freshly trained",
+    "checkpoint": "best_model.pt",
+    "frames": 5,
+    "feature_max_difference": 0.0,
+    "output_max_difference": 0.0
+  },
+  {
+    "case": "bundled v7 d4",
+    "checkpoint": "d4.pt",
+    "frames": 5,
+    "feature_max_difference": 0.0,
+    "output_max_difference": 0.0
+  },
+  {
+    "case": "bundled v7 d6",
+    "checkpoint": "d6.pt",
+    "frames": 5,
+    "feature_max_difference": 0.0,
+    "output_max_difference": 0.0
+  },
+  {
+    "case": "bundled v7 d8",
+    "checkpoint": "d8.pt",
+    "frames": 5,
+    "feature_max_difference": 0.0,
+    "output_max_difference": 0.0
+  }
+]

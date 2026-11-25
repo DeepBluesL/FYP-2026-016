@@ -93,7 +93,7 @@ def main() -> None:
         check_test_seeds(agent, args.seed, args.episodes)
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
-    env = GridWorldEnv(config)
+    env = GridWorldEnv(config, expose_truth=agent.config.needs_true_trajectory)
     controller = None
     if args.policy == "predictive":
         from uav_demo.predictive_planner import PredictivePlanner
@@ -103,7 +103,8 @@ def main() -> None:
     rows = [evaluate_episode(agent, env, seed, controller) for seed in range(args.seed, args.seed + args.episodes)]
     rate = lambda field: sum(bool(row[field]) for row in rows) / len(rows)
     successful = [row for row in rows if row["success"]]
-    summary = {"policy": args.policy, "known_future": False, "checkpoint": str(args.checkpoint.resolve()),
+    summary = {"policy": args.policy, "known_future": (getattr(agent.motion_predictor, "model_type", None) == "oracle"
+                        if args.policy == "predictive" else agent.config.network_uses_true_future), "checkpoint": str(args.checkpoint.resolve()),
                "run_metadata": agent.run_metadata,
                "known_car_goal": False, "observation_delay": config.observation_delay,
                "prediction_steps": (list(range(controller.horizon + config.sensing_steps))
@@ -118,6 +119,8 @@ def main() -> None:
                "early_goal_before_sensing_rate": rate("early_goal_before_sensing"),
                "waiting_contact_rate": rate("waiting_contact"),
                "successful_waiting_contact_count": sum(row["waiting_contact"] for row in successful),
+               "mean_completion_steps": sum(row["steps"] if row["success"] else config.max_steps for row in rows) / len(rows),
+               "mean_acquisition_step_when_collected": (sum(row["sensing_complete_step"] for row in rows if row["sensing_complete"]) / sum(row["sensing_complete"] for row in rows) if any(row["sensing_complete"] for row in rows) else None),
                "mean_success_steps": sum(row["steps"] for row in successful) / len(successful) if successful else None,
                "mean_reward": sum(row["total_reward"] for row in rows) / len(rows),
                "mean_travel_distance": sum(row["travel_distance"] for row in rows) / len(rows)}

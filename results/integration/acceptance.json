@@ -1,0 +1,14 @@
+{
+  "dqn": {
+    "deployment_actions_compared": 150,
+    "action_mismatches": 0,
+    "evaluation_routes": 32,
+    "cli_matches_matrix": true
+  },
+  "ppo": {
+    "deployment_actions_compared": 150,
+    "action_mismatches": 0,
+    "evaluation_routes": 32,
+    "cli_matches_matrix": true
+  }
+}

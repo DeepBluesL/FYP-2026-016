@@ -89,7 +89,7 @@ class PredictivePlanner:
             item[0],
         ))[0]
 
-    def choose_action(self, observation, mask) -> int:
+    def choose_action(self, observation, mask, predictions=None) -> int:
         self.last_predictions = None
         mask = np.asarray(mask, dtype=bool)
 
@@ -128,12 +128,13 @@ class PredictivePlanner:
             return 0  # 首次报告前悬停，不把占位零坐标当作车辆位置。
 
         # index 0 是当前车位估计；index 1 是当前之后一步。
-        predictions = forecast_vehicle(
-            self.motion_predictor,
-            state,
-            config,
-            steps=range(self.horizon + config.sensing_steps),
-        )
+        if predictions is None:
+            predictions = forecast_vehicle(
+                self.motion_predictor,
+                state,
+                config,
+                steps=range(self.horizon + config.sensing_steps),
+            )
         self.last_predictions = predictions.copy()
         estimated_car = predictions[0]
         forecast = predictions[1:]

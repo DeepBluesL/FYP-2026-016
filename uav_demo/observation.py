@@ -42,7 +42,7 @@ FEATURE_SIZES = {
     "uav_pos": 2, "uav_speed": 1, "uav_goal": 2, "car_pos": 2, "time": 1,
     "sensing_progress": 1, "sensing_complete": 1, "sensing_failed": 1,
     "relative_car": 2, "relative_uav_goal": 2, "car_move_phase": 1,
-    "observation_age": 1, "has_observation": 1, "rule_action": 17,
+    "observation_age": 1, "has_observation": 1, "rule_action": 17, "car_velocity": 2,
 }
 
 
@@ -64,6 +64,9 @@ def feature_slice(feature_names, name):
 
 def encode_observation(observation, config, feature_names=DEFAULT_OBSERVATION_FEATURES):
     features = observation_features(observation, config)
+    if "car_velocity" in feature_names:
+        from .prediction import observed_motion
+        features["car_velocity"] = observed_motion(observation["car_history"], config.car_move_every)
     if "rule_action" in feature_names:
         features["rule_action"] = rule_action_onehot(observation, config)
     return np.concatenate([

@@ -102,6 +102,8 @@ class TrainConfig:
     prediction_seed: int = 100_000
     prediction_split_seed: int = 42
     prediction_model_type: str = "lstm"
+    prediction_point: str = "disk"
+    rule_source: str = "linear"
     prediction_tcn_blocks: int = 4
     prediction_tcn_kernel_size: int = 3
     prediction_var_lags: int = 4  # VAR 使用最近多少个报告时刻的位置
@@ -129,3 +131,20 @@ class TrainConfig:
     train_pi_iters: int | None = None  # 未指定时为 80
     train_v_iters: int | None = None  # 未指定时为 80
     update_iters: int | None = None  # 兼容旧配置；独立字段优先
+
+    @property
+    def needs_true_trajectory(self):
+        return self.rule_source == "oracle" or (self.use_motion_prediction and self.prediction_model_type == "oracle")
+
+    @property
+    def network_uses_true_future(self):
+        return (self.rule_source == "oracle" and "rule_action" in self.observation_features
+                or self.use_motion_prediction and self.prediction_model_type == "oracle")
+
+    def __post_init__(self):
+        if self.rule_source not in ("linear", "predictor", "oracle"):
+            raise ValueError("Unknown rule_source")
+        if self.rule_source == "predictor" and not self.use_motion_prediction:
+            raise ValueError("rule_source=predictor requires motion prediction")
+        if self.prediction_point not in ("mode", "disk"):
+            raise ValueError("Unknown prediction_point")

@@ -11,19 +11,22 @@ DIRECTIONS = np.asarray(((0, 1), (1, 0), (0, -1), (-1, 0)), dtype=np.int64)
 
 
 def generate_vehicle_trajectory(
-        config: EnvConfig, rng: np.random.Generator
-) -> tuple[np.ndarray, tuple[int, int]]:
+        config: EnvConfig, rng: np.random.Generator, with_goals: bool = False
+) -> tuple:
     """返回 ``trajectory[t] = (x, y)``，包含初始时刻与整个回合。
 
     平时按方向惯性及终点偏置随机游走；剩余时间不足以继续绕路时，
     只选择仍然能按时抵达终点的方向。到达后停留，非移动时刻也停留。
     这样每次 reset 都能得到一条完整、可复现且确实到终点的路线。
+    with_goals=True 时另返回 ``goals[t]``：t 时刻车辆正前往的目的地（只供真实目的地诊断），路线本身不变。
     """
     if config.car_move_every < 1:
         raise ValueError("车辆移动间隔至少为 1 步")
     if config.car_route == "random":
-        return _random_route(config, rng)
+        trajectory, first_goal, goals = _random_route(config, rng)
+        return (trajectory, first_goal, goals) if with_goals else (trajectory, first_goal)
     size = config.grid_size
+
     if config.max_steps // config.car_move_every < 2 * (size - 1):
         raise ValueError("固定路线的移动步数不足以到达终点")
 
@@ -37,7 +40,7 @@ def generate_vehicle_trajectory(
     heading = int(rng.integers(0, 4))
     trajectory = np.empty((config.max_steps + 1, 2), dtype=np.int64)
     trajectory[0] = position
-    # 固定的 log 权重只计算一次。
+    # EnvConfig 已保证各方向权重为正；固定的 log 权重只计算一次。
     log_turn_weights = np.log(np.asarray(
         (config.car_straight_prob, config.car_turn_prob,
          config.car_reverse_prob, config.car_turn_prob), dtype=np.float64
@@ -67,11 +70,17 @@ def generate_vehicle_trajectory(
             position = options[heading].copy()
         trajectory[time] = position
 
+    if with_goals:
+        return trajectory, goal, np.tile(goal_array, (len(trajectory), 1))
     return trajectory, goal
 
 
-def _random_route(config: EnvConfig, rng: np.random.Generator) -> tuple[np.ndarray, tuple[int, int]]:
-    """随机起点和随机目的地；到达目的地后换新目的地继续行驶，不停车。返回首个目的地。"""
+def _random_route(config: EnvConfig, rng: np.random.Generator) -> tuple[np.ndarray, tuple[int, int], np.ndarray]:
+    """随机起点和随机目的地；到达目的地后换新目的地继续行驶，不停车。
+
+    返回路线、首个目的地和 goals[t]：t 时刻选移动方向所用的目的地（到达后先换目的地再选方向），
+    所以从 t 出发的下一步移动，在车位等于 goals[t] 时会先换成新目的地。
+    """
     size = config.grid_size
     cells = np.indices((size, size)).reshape(2, -1).T
     uav = np.asarray(config.uav_start)
@@ -91,7 +100,8 @@ def _random_route(config: EnvConfig, rng: np.random.Generator) -> tuple[np.ndarr
          config.car_reverse_prob, config.car_turn_prob), dtype=np.float64
     ))
     trajectory = np.empty((config.max_steps + 1, 2), dtype=np.int64)
-    trajectory[0] = position
+    goals = np.empty_like(trajectory)
+    trajectory[0], goals[0] = position, goal
     for time in range(1, config.max_steps + 1):
         if time % config.car_move_every == 0:
             if np.array_equal(position, goal):
@@ -105,5 +115,5 @@ def _random_route(config: EnvConfig, rng: np.random.Generator) -> tuple[np.ndarr
             weights = np.exp(logits - np.max(logits))
             heading = int(rng.choice(direction_indices, p=weights / weights.sum()))
             position = options[heading].copy()
-        trajectory[time] = position
-    return trajectory, first_goal
+        trajectory[time], goals[time] = position, goal
+    return trajectory, first_goal, goals

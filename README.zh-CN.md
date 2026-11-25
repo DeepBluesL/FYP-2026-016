@@ -1,5 +1,7 @@
 # 动态目标跟踪与感知的无人机路径规划
 
+[整合分支配对实验、结果和复现命令](results/integration/REPORT.md)
+
 [English](README.md) | **简体中文**
 
 ## 当前实现与进展（2026-11-09）

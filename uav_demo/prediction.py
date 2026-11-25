@@ -58,6 +58,11 @@ def _examples(config: EnvConfig, seeds: list[int]) -> tuple[np.ndarray, np.ndarr
         masks.append(_legal_directions(positions, config.grid_size))
     return np.concatenate(features), np.concatenate(labels), np.concatenate(masks)
 
+def report_history(trajectory, time: int, delay: int) -> tuple:
+    """t 时刻无人机已收到的报告历史，与 GridWorldEnv 观测里的 car_history 相同；供离线评估预测器使用。"""
+    return tuple((s, (int(trajectory[s][0]), int(trajectory[s][1]))) for s in range(time - delay + 1))
+
+
 def observed_motion(history, move_every):
     """从已收到的 (报告时间, 位置) 推导每次移动的位移；首报方向未知。
 
@@ -86,6 +91,8 @@ def forecast_vehicle(predictor, state, config, steps):
     if not state["has_observation"]:
         return None
 
+    if getattr(predictor, "model_type", None) == "oracle":
+        return predictor.forecast(state, config.max_steps, steps)
     age = state["observation_age"]
 
     return predictor.predict_positions(

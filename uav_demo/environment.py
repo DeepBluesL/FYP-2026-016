@@ -52,8 +52,10 @@ class GridWorldEnv:
 
     action_count = len(ACTIONS)
 
-    def __init__(self, config: EnvConfig | None = None):
+    def __init__(self, config: EnvConfig | None = None, expose_truth: bool = False):
         self.config = config if config is not None else EnvConfig()
+        # 仅真实位置诊断打开：观测里附带完整真实轨迹。默认关闭，观测只含智能体能看到的延迟报告。
+        self.expose_truth = expose_truth
         self.uav_pos = tuple(self.config.uav_start)
         self.uav_speed = self.config.initial_speed
         self.car_trajectory = np.empty((self.config.max_steps + 1, 2), dtype=np.int64)
@@ -208,7 +210,7 @@ class GridWorldEnv:
         has_observation = observation_time >= 0
         history = tuple(self.car_observation_history[:observation_time + 1]) if has_observation else ()
         car_pos = history[-1][1] if history else None
-        return {
+        observation = {
             "uav_pos": tuple(self.uav_pos),
             "uav_speed": self.uav_speed,
             "uav_goal": tuple(self.config.uav_goal),
@@ -221,6 +223,9 @@ class GridWorldEnv:
             "observation_age": self.time - observation_time if has_observation else 0,
             "has_observation": has_observation,
         }
+        if self.expose_truth:
+            observation["true_car_trajectory"] = self.car_trajectory
+        return observation
 
     def _info(self, invalid_move: bool) -> dict:
         contact = self._distance(self.uav_pos, self.car_pos) <= self.config.sensing_radius

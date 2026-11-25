@@ -18,6 +18,8 @@ from uav_demo.config import ACTIVATION_NAMES, EnvConfig, TrainConfig
 from uav_demo.environment import GridWorldEnv
 from uav_demo.observation import encode_observation
 from uav_demo.prediction_data import split_route_seeds
+from uav_demo.linear_prediction import LinearPredictor
+from uav_demo.oracle_prediction import OraclePredictor
 from uav_demo.sequence_prediction import fit_sequence_predictor
 
 
@@ -28,7 +30,7 @@ def epsilon_at(step: int, config: TrainConfig) -> float:
 
 def evaluate(agent: DQNAgent | PPOAgent, env_config: EnvConfig, config: TrainConfig) -> dict:
     """使用固定且独立的验证种子，只执行 greedy policy，不更新模型；逐局逻辑复用 evaluate_episode。"""
-    env = GridWorldEnv(env_config)
+    env = GridWorldEnv(env_config, expose_truth=config.needs_true_trajectory)
     rows = [evaluate_episode(agent, env, config.eval_seed + index) for index in range(config.eval_episodes)]
     successful_steps = [row["steps"] for row in rows if row["success"]]
 
@@ -44,6 +46,63 @@ def evaluate(agent: DQNAgent | PPOAgent, env_config: EnvConfig, config: TrainCon
         "mean_success_steps": float(np.mean(successful_steps)) if successful_steps else "",
         "mean_travel_distance": mean("travel_distance"),
     }
+
+
+def fit_predictor(env_config: EnvConfig, config: TrainConfig, output_dir: Path):
+    """按 prediction_model_type 建预测器；需要拟合的只用预测器训练路线，验证和最终测试路线都不进入拟合。"""
+    if config.prediction_model_type == "oracle":
+        return OraclePredictor()
+    if config.prediction_model_type == "linear":
+        return LinearPredictor()
+    groups = split_route_seeds(
+        route_count=config.prediction_routes,
+        start_seed=config.prediction_seed,
+        split_seed=config.prediction_split_seed,
+    )
+    if config.prediction_model_type == "goal_filter":
+        from uav_demo.goal_inference import GoalFilterPredictor
+        predictor, metrics = GoalFilterPredictor.fit(env_config, groups)
+        print(f"Goal filter: turn probabilities={metrics['turn_probabilities']}, "
+              f"goal bias={metrics['goal_bias']:.3f}, "
+              f"validation log-likelihood per move={metrics['validation_log_likelihood']:.4f}", flush=True)
+    elif config.prediction_model_type == "direction_lstm":
+        from uav_demo.direction_prediction import DirectionPredictor
+        print(f"Fitting {config.prediction_model_type} model on {len(groups['train'])} training routes...", flush=True)
+        predictor, metrics = DirectionPredictor.fit(
+            env_config, groups, epochs=config.prediction_epochs, seed=config.seed,
+            learning_rate=config.prediction_learning_rate, batch_size=config.prediction_batch_size,
+            device=config.prediction_device, hidden_size=config.prediction_hidden_size,
+            head_size=config.prediction_head_size,
+        )
+        print(f"Motion model: validation log-likelihood per move="
+              f"{metrics['best_validation_log_likelihood']:.4f}", flush=True)
+    elif config.prediction_model_type == "var":
+        from uav_demo.var_prediction import VARPredictor
+        predictor, metrics = VARPredictor.fit(
+            env_config, groups, lags=config.prediction_var_lags,
+        )
+    else:
+        predictor, metrics = fit_sequence_predictor(
+            env_config,
+            groups,
+            model_type=config.prediction_model_type,
+            learning_rate=config.prediction_learning_rate,
+            batch_size=config.prediction_batch_size,
+            device=config.prediction_device,
+            hidden_size=config.prediction_hidden_size,
+            head_size=config.prediction_head_size,
+            num_layers=config.prediction_num_layers,
+            tcn_blocks=config.prediction_tcn_blocks,
+            tcn_kernel_size=config.prediction_tcn_kernel_size,
+            epochs=config.prediction_epochs,
+            seed=config.seed,
+        )
+
+    (output_dir / "prediction_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    # 输出分布的预测器按 prediction_point 从分布里取点。
+    if hasattr(predictor, "point"):
+        predictor.point, predictor.radius = config.prediction_point, env_config.sensing_radius
+    return predictor
 
 
 def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path, *, motion_predictor=None) -> DQNAgent | PPOAgent:
@@ -75,49 +134,12 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path, *,
             raise ValueError("预测器种子与训练或验证种子重叠")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    env = GridWorldEnv(env_config)
+    env = GridWorldEnv(env_config, expose_truth=config.needs_true_trajectory)
     predictor = motion_predictor
     if predictor is not None and not config.use_motion_prediction:
         raise ValueError("A supplied predictor requires use_motion_prediction=True")
     if config.use_motion_prediction and predictor is None:
-        # 只使用训练种子生成监督样本；验证和最终测试路线都不能进入预测器拟合。
-
-        groups = split_route_seeds(
-            route_count=config.prediction_routes,
-            start_seed=config.prediction_seed,
-            split_seed=config.prediction_split_seed,
-        )
-
-        print(f"Fitting {config.prediction_model_type} model on {len(groups['train'])} training routes...", flush=True)
-        if config.prediction_model_type == "var":
-            from uav_demo.var_prediction import VARPredictor
-            predictor, prediction_metrics = VARPredictor.fit(
-                env_config, groups, lags=config.prediction_var_lags,
-            )
-            validation_mse = prediction_metrics["validation_mse"]
-        else:
-            predictor, prediction_metrics = fit_sequence_predictor(
-                env_config,
-                groups,
-                model_type=config.prediction_model_type,
-                learning_rate=config.prediction_learning_rate,
-                batch_size=config.prediction_batch_size,
-                device=config.prediction_device,
-                hidden_size=config.prediction_hidden_size,
-                head_size=config.prediction_head_size,
-                num_layers=config.prediction_num_layers,
-                tcn_blocks=config.prediction_tcn_blocks,
-                tcn_kernel_size=config.prediction_tcn_kernel_size,
-                epochs=config.prediction_epochs,
-                seed=config.seed,
-            )
-            validation_mse = prediction_metrics["best_validation_mse"]
-
-        (output_dir / "prediction_metrics.json").write_text(
-            json.dumps(prediction_metrics, indent=2), encoding="utf-8",
-        )
-        print(f"Motion model: validation MSE={validation_mse:.6f}",
-              flush=True)
+        predictor = fit_predictor(env_config, config, output_dir)
     sample, _ = env.reset(seed=config.seed)
     observation_size = encode_observation(sample, env_config, config.observation_features).size
     use_ppo = config.algorithm == "ppo"
@@ -126,6 +148,10 @@ def train(env_config: EnvConfig, config: TrainConfig, output_dir: str | Path, *,
                       motion_predictor=predictor, env_config=env_config)
     config = agent.config
     agent.run_metadata = {
+        "observation_features": list(config.observation_features), "observation_size": observation_size,
+        "prediction_steps": list(config.prediction_steps), "network_input_size": agent.network_input_size,
+        "rule_source": config.rule_source, "rule_prior": config.rule_prior, "hidden_sizes": list(config.hidden_sizes),
+        "uses_true_future": config.network_uses_true_future,
         "run_complete": False,
         "run_train_seed_start": config.seed,
         "run_train_seed_end_exclusive": config.seed,
@@ -363,6 +389,8 @@ def main():
                         help="VAR 使用的历史位置数量，默认 4")
     parser.add_argument("--prediction-tcn-blocks", type=int, default=defaults.prediction_tcn_blocks)
     parser.add_argument("--prediction-tcn-kernel-size", type=int, default=defaults.prediction_tcn_kernel_size)
+    parser.add_argument("--rule-source", choices=("linear","predictor","oracle"), default="linear")
+    parser.add_argument("--prediction-point", choices=("mode","disk"), default="disk")
     parser.add_argument("--prediction-model-type", default=defaults.prediction_model_type)
     parser.add_argument("--prediction-device", choices=("auto", "cuda", "cpu"), default=defaults.prediction_device)
     parser.add_argument("--epsilon-decay-steps", type=int, default=defaults.epsilon_decay_steps)
@@ -410,7 +438,7 @@ def main():
         prediction_var_lags=args.prediction_var_lags,
         prediction_tcn_blocks=args.prediction_tcn_blocks,
         prediction_tcn_kernel_size=args.prediction_tcn_kernel_size,
-        prediction_model_type=args.prediction_model_type,
+        prediction_model_type=args.prediction_model_type, rule_source=args.rule_source, prediction_point=args.prediction_point,
         prediction_device=args.prediction_device,
         epsilon_decay_steps=args.epsilon_decay_steps,
         prediction_steps=tuple(args.prediction_steps),

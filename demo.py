@@ -13,7 +13,7 @@ from uav_demo.planner import OraclePlanner
 
 
 def make_record(observation, info, action=None, reward=0.0):
-    return {**info, "observation": dict(observation), "action": action,
+    return {**info, "observation": {k: v for k, v in observation.items() if k != "true_car_trajectory"}, "action": action,
             "reward": reward, "car_prediction": None, "prediction_steps": []}
 
 
@@ -49,7 +49,7 @@ def main() -> None:
         config = EnvConfig(sensing_mode=args.sensing_mode or EnvConfig().sensing_mode)
         agent = OraclePlanner()
 
-    env = GridWorldEnv(config)
+    env = GridWorldEnv(config, expose_truth=args.policy != "oracle" and agent.config.needs_true_trajectory)
     observation, info = env.reset(seed=args.seed)
     records = [make_record(observation, info)]
     total_reward = 0.0
@@ -80,13 +80,16 @@ def main() -> None:
         "policy": "oracle_heuristic" if args.policy == "oracle" else args.policy,
         "observation_mode": "full_route_oracle" if args.policy == "oracle" else "delayed_vehicle",
         "observation_delay": config.observation_delay,
+        "known_future": args.policy == "oracle" or (getattr(agent.motion_predictor, "model_type", None) == "oracle"
+                        if args.policy == "predictive" else agent.config.network_uses_true_future),
         "known_car_goal": args.policy == "oracle",
         "prediction_steps": (list(range(controller.horizon + config.sensing_steps))
                              if controller is not None else
                              list(agent.config.prediction_steps)
                              if args.policy in ("dqn", "ppo") and agent.motion_predictor is not None else []),
         "observation_features": list(agent.config.observation_features) if args.policy != "oracle" else [],
-        "learned_motion_prediction": args.policy != "oracle" and agent.motion_predictor is not None,
+        "learned_motion_prediction": args.policy != "oracle" and agent.motion_predictor is not None
+                                     and getattr(agent.motion_predictor, "model_type", None) not in ("linear", "oracle"),
         "seed": args.seed,
         "success": info["success"],
         "sensing_complete": info["sensing_complete"],

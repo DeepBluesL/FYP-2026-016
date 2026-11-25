@@ -1,5 +1,7 @@
 # UAV Path Planning for Dynamic Target Tracking and Sensing
 
+[Paired integration experiments, results and reproduction commands](results/integration/REPORT.md)
+
 **English** | [简体中文](README.zh-CN.md)
 
 A GridWorld research project combining vehicle motion prediction with Double DQN for UAV tracking, sensing, and navigation. Current implementation: November 9, 2026.
