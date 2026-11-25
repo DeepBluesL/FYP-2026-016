@@ -229,6 +229,8 @@ def main():
     )
     parser.add_argument("--rule-prior", type=float, default=defaults.rule_prior,
                         help=">0 时启用外推规则先验：偏离规则的动作在 Q 值上扣该分数；需在 --observation-features 中加入 rule_action")
+    parser.add_argument("--no-rule-action-input", dest="rule_action_input", action="store_false",
+                        help="规则动作只用于先验，不进网络输入（需 --rule-prior > 0）")
     parser.add_argument("--rule-source", choices=("linear", "predictor", "oracle"), default=defaults.rule_source,
                         help="规则追的下一步车位：linear 线性预测；predictor 运动预测器；oracle 真实车位（仅诊断上限）")
     parser.add_argument("--auto-return", action="store_true", help="采集结束后自动沿最短路径返回终点")
@@ -264,6 +266,7 @@ def main():
         prediction_steps=tuple(args.prediction_steps),
         observation_features=tuple(args.observation_features),
         rule_prior=args.rule_prior,
+        rule_action_input=args.rule_action_input,
     )
     env_config = EnvConfig(
         sensing_mode=args.sensing_mode,

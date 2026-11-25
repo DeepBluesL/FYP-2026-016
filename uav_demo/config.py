@@ -183,6 +183,8 @@ class TrainConfig:
     # 这是残差 Q 学习（Li et al., NeurIPS 2023）的自制简化：用硬最大值代替论文里的软最大值（log-sum-exp）和按概率抽样。
     # 需在 observation_features 中加入 rule_action。
     rule_prior: float = 0.0
+    # False：规则动作只用于先验，不进网络输入（仍存进经验，供先验读取）；需 rule_prior > 0。
+    rule_action_input: bool = True
     # 规则追的下一步车位从哪来：linear 线性预测；predictor 用运动预测器；oracle 用真实车位（仅诊断上界）。
     rule_source: str = "linear"
 
@@ -249,6 +251,8 @@ class TrainConfig:
             raise ValueError("rule_prior 必须是非负有限数")
         if self.rule_prior > 0 and "rule_action" not in self.observation_features:
             raise ValueError("rule_prior > 0 时 observation_features 必须包含 rule_action")
+        if not self.rule_action_input and self.rule_prior <= 0:
+            raise ValueError("rule_action_input=False 时规则动作只给先验用，需要 rule_prior > 0")
         if self.rule_source not in ("linear", "predictor", "oracle"):
             raise ValueError("rule_source 只能取 linear、predictor 或 oracle")
         if self.rule_source == "predictor" and not self.use_motion_prediction:

@@ -7,8 +7,8 @@
 
 ## 方法
 
-每一步，预测器根据延迟报告预测车的下一步位置，规则朝这个点走一步。Double DQN（van Hasselt et al., AAAI 2016）的输入里有规则动作和预测点；
-不照规则走的动作扣 `b`（`--rule-prior`）。这是残差 Q 学习（Li et al., NeurIPS 2023）的自制简化：用硬最大值代替软最大值。
+每一步，预测器根据延迟报告预测车的下一步位置，规则朝这个点走一步。Double DQN（van Hasselt et al., AAAI 2016）的输入里有预测点；
+规则动作只用于先验（`--no-rule-action-input`）：不照规则走的动作扣 `b`（`--rule-prior`）。这是残差 Q 学习（Li et al., NeurIPS 2023）的自制简化：用硬最大值代替软最大值。
 
 | `--prediction-model-type` | 做法 | 出处 |
 |---|---|---|
@@ -23,7 +23,7 @@
 
 ```powershell
 python -m pip install -r requirements.txt
-python train.py --car-route random --auto-return --reward-v2 --movement-penalty 0 --observation-delay 8 --prediction-model-type direction_lstm --rule-source predictor --rule-prior 0.1 --observation-features uav_pos uav_speed uav_goal car_pos time sensing_progress sensing_complete sensing_failed relative_car relative_uav_goal car_move_phase observation_age has_observation rule_action --output-dir outputs/example
+python train.py --episodes 4000 --car-route random --auto-return --reward-v2 --movement-penalty 0 --observation-delay 8 --prediction-model-type direction_lstm --prediction-point disk --rule-source predictor --rule-prior 0.1 --no-rule-action-input --observation-features uav_pos uav_speed uav_goal car_pos time sensing_progress sensing_complete sensing_failed relative_car relative_uav_goal car_move_phase observation_age has_observation rule_action --output-dir outputs/example
 python evaluate.py --checkpoint outputs/example/best_model.pt --episodes 200 --output-dir outputs/example_test
 python demo.py --checkpoint outputs/example/best_model.pt --output-dir outputs/example_demo
 python -m pytest -q
@@ -40,6 +40,7 @@ python -m pytest -q
 | 11-04 | lhy | 15×15，固定路线，延迟 3 步 | 100 条测试路线：DQN 成功率 95%，预测拦截规划器 59% |
 | 11-09 至 11-11 | lhy | 实现 RNN / LSTM / GRU、TCN、VAR 预测器（均方误差训练） | 之后在随机路线上比较，都不如线性预测；方向 LSTM 由其 LSTM 和 MLP 方向分类器改来 |
 | 11-05 至 11-24 | karnes | 随机路线，延迟 8 / 12 步，各 10 个种子，失败记 150 步 | 纯 DQN 100.8 / 122.4 步；规则 + 先验：线性预测 56.8 / 80.9，方向 LSTM 53.7 / 72.0，目的地推断 53.8 / 69.1 |
+| 11-25 | karnes | 规则动作只用于先验、不进网络输入；延迟 6 / 8 / 12 步，3 个种子 | 训练 1500 局（即 `jobs_table3_4k_*.txt` 去掉 `--episodes 4000`）：方向 LSTM 比规则动作进输入时多 15.4 / 9.0 / 2.7 步。训练 4000 局：线性预测三个延迟都在 4 步以内；方向 LSTM d=6 种子 0 相同（43.9）。表3 正按这种输入、训练 4000 局重跑（`jobs_table3_4k_*.txt`） |
 
 前三行的配置和复现命令见 [README_LOCAL.md](README_LOCAL.md)。
 
