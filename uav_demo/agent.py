@@ -393,7 +393,10 @@ class DQNAgent(ObservationAgent):
                     raise ValueError(f"该模型使用已移除的选项 {field}，不再支持加载")
             for field in ("prediction_grid_turns", "contact_grid_turns"):
                 train_values.pop(field, None)
-            train_values["prediction_device"] = device
+            # 预测器留在训练时的设备上：方向 LSTM 在 CPU 和 GPU 上抽样的随机数不同，换设备会改变测试结果。
+            # 只有训练时用 GPU、当前机器没有 CUDA 时，才退回到 device。
+            if train_values.get("prediction_device", device) == "cuda" and not torch.cuda.is_available():
+                train_values["prediction_device"] = device
             train_config = TrainConfig(**train_values)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("模型中的网络或训练配置缺失或无效。") from error

@@ -73,7 +73,7 @@ class TrainConfig:
     total_steps: int | None = None
     eval_every_steps: int | None = None  # 默认 rollout_steps 的 10 倍
     test_seed: int = 3_000_000
-    test_episodes: int = 100
+    test_episodes: int = 200  # 与 spec 的表3 测试（3000000 起 200 条路线）一致
     batch_size: int = 64
     learning_rate: float = 0.0005
     gamma: float = 0.99
