@@ -8,6 +8,9 @@
 
 本仓库已实现无障碍 GridWorld、Double DQN、车辆运动预测器、贪心追踪、外推追踪、预测拦截规划器与 Oracle 启发式对照。现已接入 RNN、LSTM、GRU 完整路线序列预测；原始规划及团队分工见 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
+每一步，预测器根据延迟报告预测车的下一步位置，规则朝这个点走一步。Double DQN（van Hasselt et al., AAAI 2016）的输入里有预测点；
+规则动作只用于先验（`--no-rule-action-input`）：不照规则走的动作扣 `b`（`--rule-prior`）。这是残差 Q 学习（Li et al., NeurIPS 2023）的自制简化：用硬最大值代替软最大值。
+
 ### 环境与信息边界
 
 - 默认地图 50×50，UAV 支持悬停及八方向、两档步长，共 17 个动作。支持连续和累计采集；完成采集并到达 UAV 终点才算成功。
@@ -51,11 +54,20 @@ python -m pip install -r requirements.txt
 python train.py --episodes 1500 --observation-delay 3 --output-dir outputs/train_delay3
 python evaluate.py --checkpoint outputs/train_delay3/best_model.pt --policy dqn --episodes 100 --output-dir outputs/test_delay3
 python demo.py --checkpoint outputs/train_delay3/best_model.pt --policy dqn --output-dir outputs/demo_delay3
+python train.py --episodes 4000 --car-route random --auto-return --reward-v2 --movement-penalty 0 --observation-delay 8 --prediction-model-type direction_lstm --prediction-point disk --prediction-hidden-size 128 --prediction-head-size 64 --prediction-epochs 40 --rule-source predictor --prediction-steps 1 --rule-prior 0.1 --no-rule-action-input --hidden-sizes 128 128 128 --observation-features uav_pos uav_speed uav_goal car_pos time sensing_progress sensing_complete sensing_failed relative_car relative_uav_goal car_move_phase observation_age has_observation rule_action --output-dir outputs/example
 ```
 
 评估和演示的 `--policy predictive` 可切换为预测拦截规划器，需要模型包含车辆预测器。`--no-motion-prediction` 关闭 DQN 的预测附加输入，`--no-gif` 可用于 demo 只生成静态图。模型、日志和动画保存在 `outputs/`，该目录不上传 GitHub。
 
 ### 已完成的实验
+
+| 时间 | 完成人 | 设置 | 结果 |
+|---|---|---|---|
+| 10-22 | lhy | 50×50，车从固定角落出发，无延迟，1 个训练种子 | 100 条测试路线：DQN 与贪心追踪成功率都是 100%，平均 43.8 / 43.6 步 |
+| 11-04 | lhy | 15×15，固定路线，延迟 3 步 | 100 条测试路线：DQN 成功率 95%，预测拦截规划器 59% |
+| 11-09 至 11-11 | lhy | 实现 RNN / LSTM / GRU、TCN、VAR 预测器（均方误差训练） | 之后在随机路线上比较，都不如线性预测；方向 LSTM 由其 LSTM 和 MLP 方向分类器改来 |
+| 11-05 至 11-24 | karnes | 随机路线，延迟 8 / 12 步，各 10 个种子，失败记 150 步 | 纯 DQN 100.8 / 122.4 步；规则 + 先验：线性预测 56.8 / 80.9，方向 LSTM 53.7 / 72.0，目的地推断 53.8 / 69.1 |
+| 11-25 | karnes | 规则动作只用于先验、不进网络输入；延迟 6 / 8 / 12 步，3 个种子 | 训练 1500 局（即 `jobs_table3_4k_*.txt` 去掉 `--episodes 4000`）：方向 LSTM 比规则动作进输入时多 15.4 / 9.0 / 2.7 步。训练 4000 局：线性预测三个延迟都在 4 步以内；方向 LSTM d=6 种子 0 相同（43.9）。表3 正按这种输入、训练 4000 局重跑（`jobs_table3_4k_*.txt`） |
 
 2026-11-04 的 15×15 固定路线实验：报告延迟 3 步，完整默认特征，DQN 训练 1,500 回合，预测器使用 300 条路线训练 20 个 epoch。验证集选出第 1,200 回合模型，在 100 条独立测试路线上，DQN 成功率 **95%**，预测规划器 **59%**。
 

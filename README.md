@@ -14,6 +14,7 @@ A GridWorld research project combining vehicle motion prediction with Double DQN
 - Default DQN observations have 18 dimensions; three predicted positions add six features. UAV state and sensing progress remain available.
 - RNN, LSTM, and GRU predictors share a single implementation. Default architecture: input `(x,y,time)` → one 256-unit recurrent layer → Linear(256,128) → ReLU → Linear(128,2).
 - The original MLP, greedy pursuit, motion extrapolation, predictive planning, and Oracle heuristic remain in the codebase. MLP and extrapolation infer motion from received history.
+- Rule prior (`--rule-prior b`, needs `rule_action` in the features): Q-values of actions that differ from the rule lose `b`. With `--no-rule-action-input` the rule action is used only by the prior, not as a network input (20 inputs with one predicted point instead of 37); this is the spec branch's table 3 setting.
 
 ## Route data and training
 
@@ -32,6 +33,7 @@ python -m pip install -r requirements.txt
 python train.py --prediction-model-type lstm --prediction-learning-rate 0.001 --prediction-batch-size 32 --prediction-device auto --observation-delay 3 --output-dir outputs/lstm
 python evaluate.py --checkpoint outputs/lstm/best_model.pt --policy dqn --episodes 100 --output-dir outputs/test_lstm
 python demo.py --checkpoint outputs/lstm/best_model.pt --policy dqn --output-dir outputs/demo_lstm
+python train.py --episodes 4000 --car-route random --auto-return --reward-v2 --movement-penalty 0 --observation-delay 8 --prediction-model-type direction_lstm --prediction-point disk --prediction-hidden-size 128 --prediction-head-size 64 --prediction-epochs 40 --rule-source predictor --prediction-steps 1 --rule-prior 0.1 --no-rule-action-input --hidden-sizes 128 128 128 --observation-features uav_pos uav_speed uav_goal car_pos time sensing_progress sensing_complete sensing_failed relative_car relative_uav_goal car_move_phase observation_age has_observation rule_action --output-dir outputs/example
 ```
 
 Change `--prediction-model-type` to `rnn` or `gru` for comparisons. All predictor options are independent of DQN settings:
@@ -51,6 +53,18 @@ Change `--prediction-model-type` to `rnn` or `gru` for comparisons. All predicto
 | `--prediction-steps` | 4 8 12 | Forecast offsets from the current decision time |
 
 DQN device selection remains separate (`--device`, default CPU). `--no-motion-prediction` disables forecast features; `--policy predictive` selects predictive planning in evaluation/demo. Forecasting adds report age to requested horizons exactly once. Outputs are stored under `outputs/`.
+
+## Completed experiments
+
+| Date | By | Setting | Result |
+|---|---|---|---|
+| 10-22 | lhy | 50×50, car starts from a fixed corner, no delay, 1 training seed | 100 test routes: DQN and greedy pursuit both 100% success, 43.8 / 43.6 steps |
+| 11-04 | lhy | 15×15, fixed route, delay 3 | 100 test routes: DQN 95% success, predictive planner 59% |
+| 11-09 to 11-11 | lhy | RNN / LSTM / GRU, TCN and VAR predictors trained with MSE | Later compared on random routes: all worse than linear prediction; the direction LSTM was adapted from their LSTM and MLP direction classifier |
+| 11-05 to 11-24 | karnes | Random routes, delay 8 / 12, 10 seeds each, failure counted as 150 steps | Pure DQN 100.8 / 122.4 steps; rule + prior: linear 56.8 / 80.9, direction LSTM 53.7 / 72.0, goal filter 53.8 / 69.1 |
+| 11-25 | karnes | Rule action only in the prior, not in the network input; delay 6 / 8 / 12, 3 seeds | 1500 episodes (`jobs_table3_4k_*.txt` without `--episodes 4000`): direction LSTM 15.4 / 9.0 / 2.7 steps worse than with the rule action as input. 4000 episodes: linear within 4 steps at all delays; direction LSTM d=6 seed 0 equal (43.9). Table 3 is being rerun this way with 4000 episodes (`jobs_table3_4k_*.txt`) |
+
+Settings and commands for the first three rows: [README_LOCAL.md](README_LOCAL.md).
 
 ## Code map
 

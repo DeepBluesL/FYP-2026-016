@@ -88,6 +88,64 @@ class PersistentPriorTests(unittest.TestCase):
         self.assertAlmostEqual(float(q[other]), float(agent.online(features)[other]) - 5.0, places=4)
 
 
+class PriorWithoutRuleInputTests(unittest.TestCase):
+    """rule_action_input=False：规则动作只用于先验，网络看不到那 17 列。"""
+
+    def _agent(self, rule_prior=0.1):
+        import torch
+        config = EnvConfig(observation_delay=2)
+        train = TrainConfig(use_motion_prediction=False, observation_features=RULE_FEATURES,
+                            rule_prior=rule_prior, rule_action_input=False, hidden_sizes=(8,))
+        env = GridWorldEnv(config)
+        observation, _ = env.reset(seed=7)
+        for _ in range(3):
+            observation, *_ = env.step(0)
+        size = encode_observation(observation, config, RULE_FEATURES).size
+        agent = DQNAgent(size, env.action_count, train, env_config=config)
+        return agent, env, observation, torch.as_tensor(agent._features(observation)), size
+
+    def test_requires_rule_prior(self):
+        with self.assertRaises(ValueError):
+            TrainConfig(use_motion_prediction=False, observation_features=RULE_FEATURES,
+                        rule_prior=0.0, rule_action_input=False)
+
+    def test_network_ignores_rule_columns_but_prior_uses_them(self):
+        agent, _, _, features, size = self._agent()
+        self.assertEqual(agent.network_input_size, size - 17)
+        rule = feature_slice(RULE_FEATURES, "rule_action")
+        moved = features.clone()
+        current = int(features[rule].argmax())
+        moved[rule] = 0.0
+        moved[rule.start + (current + 1) % 17] = 1.0
+        # 网络输出与规则动作无关；加先验后，只有规则动作那一格不扣分。
+        self.assertTrue(agent._network(agent.online, features).equal(agent._network(agent.online, moved)))
+        raw = agent._network(agent.online, moved)
+        q = agent._q(agent.online, moved)
+        self.assertAlmostEqual(float(q[(current + 1) % 17] - raw[(current + 1) % 17]), 0.0, places=6)
+        self.assertAlmostEqual(float(q[current] - raw[current]), -0.1, places=6)
+
+    def test_large_prior_still_makes_untrained_agent_follow_rule(self):
+        agent, env, observation, _, _ = self._agent(rule_prior=1000.0)
+        rule = ExtrapolatePursuit(env.config)
+        for _ in range(10):
+            mask = env.valid_action_mask()
+            action = agent.choose_action(observation, epsilon=0.0, mask=mask)
+            self.assertEqual(action, rule.choose_action(observation, mask))
+            observation, *_ = env.step(action)
+
+    def test_save_and_load_keep_setting(self):
+        import tempfile
+        from pathlib import Path
+        agent, env, observation, features, _ = self._agent()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "model.pt"
+            agent.save(path, env.config)
+            loaded, _ = DQNAgent.load(path)
+        self.assertFalse(loaded.config.rule_action_input)
+        self.assertEqual(loaded.network_input_size, agent.network_input_size)
+        self.assertTrue(loaded._q(loaded.online, features).equal(agent._q(agent.online, features)))
+
+
 class LegacyPriorModeTests(unittest.TestCase):
     def test_init_mode_rejected_only_when_prior_enabled(self):
         """旧模型记录了 rule_prior_mode=init：rule_prior=0 时先验未启用，应可加载；>0 时拒绝。"""

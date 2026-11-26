@@ -131,6 +131,8 @@ class TrainConfig:
     train_pi_iters: int | None = None  # 未指定时为 80
     train_v_iters: int | None = None  # 未指定时为 80
     update_iters: int | None = None  # 兼容旧配置；独立字段优先
+    # False：规则动作只用于先验，不进网络输入（仍存进经验，供先验读取）；需 rule_prior > 0。
+    rule_action_input: bool = True
 
     @property
     def needs_true_trajectory(self):
@@ -142,6 +144,8 @@ class TrainConfig:
                 or self.use_motion_prediction and self.prediction_model_type == "oracle")
 
     def __post_init__(self):
+        if not self.rule_action_input and (self.rule_prior <= 0 or self.algorithm != "dqn"):
+            raise ValueError("rule_action_input=False 时规则动作只给 DQN 的规则先验用，需要 algorithm=dqn 且 rule_prior > 0")
         if self.rule_source not in ("linear", "predictor", "oracle"):
             raise ValueError("Unknown rule_source")
         if self.rule_source == "predictor" and not self.use_motion_prediction:

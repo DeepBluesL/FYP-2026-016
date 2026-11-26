@@ -111,12 +111,19 @@ class ObservationAgent:
         self.motion_predictor = motion_predictor
         self.env_config = env_config
         self._prediction_cache = {}
-        self.network_input_size = observation_size + (
+        feature_size = observation_size + (
             2 * len(config.prediction_steps)
             if motion_predictor is not None else 0
         )
 
         self.device = resolve_device(config.device)
+        # rule_action_input=False：规则动作仍留在特征向量里（经验里也存着，先验要读），只是不进网络。
+        self._network_columns = None
+        if not config.rule_action_input:
+            rule = feature_slice(config.observation_features, "rule_action")
+            self._network_columns = torch.as_tensor(
+                [i for i in range(feature_size) if not rule.start <= i < rule.stop], device=self.device)
+        self.network_input_size = feature_size if self._network_columns is None else len(self._network_columns)
         torch.set_num_threads(config.torch_threads)
         torch.manual_seed(config.seed)
         if self.device.type == "cuda":
@@ -258,7 +265,7 @@ class DQNAgent(ObservationAgent):
         dones = torch.as_tensor(dones, dtype=torch.bool, device=self.device)
         next_masks = torch.as_tensor(next_masks, dtype=torch.bool, device=self.device)
         # 被拟合的是不含先验的残差 Q；先验只进入动作选择和下一步目标。
-        fitted = self.online(observations)
+        fitted = self._network(self.online, observations)
         predicted = fitted.gather(1, actions[:, None]).squeeze(1)
         with torch.no_grad():
             next_actions = self._q(self.online, next_observations).masked_fill(~next_masks, -torch.inf).argmax(dim=1)
@@ -276,9 +283,15 @@ class DQNAgent(ObservationAgent):
             self.target.load_state_dict(self.online.state_dict())
         return float(loss.item())
 
+    def _network(self, network, features):
+        """网络输出；rule_action_input=False 时先去掉特征里的规则动作列。"""
+        if self._network_columns is not None:
+            features = features.index_select(-1, self._network_columns)
+        return network(features)
+
     def _q(self, network, features):
         """用于选动作和下一步目标的 Q 值；启用 rule_prior 时加上规则先验（规则 one-hot 位于特征向量中）。"""
-        q = network(features)
+        q = self._network(network, features)
         if self._rule_slice is not None:
             onehot = features[..., self._rule_slice]
             # log 概率形式：规则动作 0，其余 −rule_prior；用扣分而非加分，避免按步累积正奖励。
